@@ -1,0 +1,15 @@
+# convert short names to full names
+canonicaldomains      group1.example.com group2.test
+canonicalizehostname  yes
+canonicalizemaxdots   0
+
+# maintain connections in the background
+controlmaster         auto
+controlpath           /run/user/%i/sshcontrol.%C
+controlpersist        20m
+
+# avoid firewall closing idle connections
+serveraliveinterval   113
+
+# hide banners
+loglevel              ERROR
