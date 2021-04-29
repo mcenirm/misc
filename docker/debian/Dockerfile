@@ -15,4 +15,4 @@ RUN apt-get install -y tzdata
 RUN apt-get install -y build-essential
 
 # things omitted from build-essential
-RUN apt-get install -y autoconf automake libtool pkg-config
+RUN apt-get install -y autoconf autoconf-archive automake libtool pkg-config
