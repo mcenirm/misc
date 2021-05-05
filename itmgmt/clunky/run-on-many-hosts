@@ -1,0 +1,91 @@
+#!/bin/bash
+
+purpose='Run a command on many hosts'
+
+# defaults
+# TODO fix paths...
+host_main=/TODO/hosts-rhel7.txt
+host_extras=/TODO/hosts-rhel7-extras.txt
+host_greps=( )
+parallel_jobs=0
+host_name_marker=XXHOSTNAMEXX
+command_line=( hostname -s )
+host_lists=( main )
+just_list_hosts=no
+
+Usage () { cat >&2 <<EOF
+Usage: $0 command to run...
+$purpose
+($host_main)
+Options:
+  --extras    also include "extra" hosts
+              ($host_extras)
+  --grep=...  only if lowercase hostname matches grep pattern
+              (eg: --grep=amsr)
+  --parallel  run on all hosts at the same time [default]
+  --serial    run on one host at a time (avoid mingling output)
+  -1          same as "--serial"
+  --list      do not run anything, just list the hosts that would be used
+EOF
+}
+
+# parse options
+while [ $# -gt 0 ]
+do
+  case "$1" in
+  --extras) host_lists=( main extras ) ; shift ;;
+  --grep=*) host_greps+=( "${1#--grep=}" ) ; shift ;;
+  --parallel) parallel_jobs=0 ; shift ;;
+  --serial|-1) parallel_jobs=1 ; shift ;;
+  --list) just_list_hosts=yes ; shift ;;
+  --) shift ; break ;;
+  -*) Usage ; exit 1 ;;
+  *) break ;;
+  esac
+done
+
+[ $# -gt 0 ] && command_line=( "$@" )
+
+# combine host lists, if requested
+host_list_files=()
+for name in "${host_lists[@]}"
+do
+  var=host_$name
+  file=${!var}
+  host_list_files+=( "$file" )
+done
+
+# prepare grep
+grep_cmd=( grep )
+if [ ${#host_greps[*]} -lt 1 ]
+then
+  grep_cmd+=( -e . )
+else
+  for host_grep in "${host_greps[@]}"
+  do
+    grep_cmd+=( -e "$host_grep" )
+  done
+fi
+
+if [ $just_list_hosts = yes ]
+then
+  action=( cat )
+else
+  # use GNU xargs to run ssh for each hostname
+  # note: prevents use of stdin by remote commands
+  action=(
+    xargs
+      -P"$parallel_jobs"
+      -I"$host_name_marker"
+    ssh
+      -nxT
+      "$host_name_marker"
+    "${command_line[@]}"
+  )
+fi
+
+# run commmand
+cat -- "${host_list_files[@]}" \
+| tr [:upper:] [:lower:] \
+| "${grep_cmd[@]}" \
+| "${action[@]}"
