@@ -1,3 +1,4 @@
+from __future__ import print_function
 from datetime import date, timedelta
 
 ISOWEDNESDAY = 3
