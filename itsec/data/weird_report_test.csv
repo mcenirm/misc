@@ -1,3 +1,3 @@
-"id","TODO report key"
-83823,b"example with double quotes\none\n'two'\nthree\n"
-95172,b'example with single quotes\none\n"two"\nthree\n'
+"VULN_ID","NAME","QID","50","PAYLOAD REQUEST","PAYLOAD RESPONSE","status"
+12091778,Something troublesome,1001234,https://www.example.com/brokenpage.html,GET https://www.example.com/brokenpage.html,b"example with double quotes\none\n'two'\nthree\n","needs fix"
+95172,Directory Listing,1005678,https://www.example.com/data/,GET https://www.example.com/data/,b'example with single quotes\none\n"two"\nthree\n',"false positive"
