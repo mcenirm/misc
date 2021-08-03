@@ -1,1 +1,2 @@
-*.reg   text working-tree-encoding=UTF-16LE eol=CRLF
+# Save the registry file fixes for another day
+#*.reg   text working-tree-encoding=UTF-16LE eol=CRLF
