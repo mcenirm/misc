@@ -104,10 +104,17 @@ def main():
                     ]:
                         if k in d["data"]:
                             record[k] = d["data"][k][0]
+                            del d["data"][k]
                         else:
                             record[k] = "n/a"
                     record["computer"] = record["computer"].split(".")[0]
                     record["serial"] = apostrophize_number_as_text(record["serial"])
+
+                    for k in d["data"].keys():
+                        record[k] = d["data"][k][0]
+                        if not k in FIELD_LABELS:
+                            print("** unexpected parameter:", k, file=sys.stderr)
+                            FIELD_LABELS[k] = k
 
                     records.append(record)
         else:
