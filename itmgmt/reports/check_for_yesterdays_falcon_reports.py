@@ -73,6 +73,7 @@ def main():
                     t_zone = apostrophize_number_as_text(t_zone)
 
                     lead, psbuild = d["user_agent"].rsplit("/", 1)
+                    psbuild = apostrophize_number_as_text(psbuild)
                     if not lead.lower().endswith("powershell"):
                         psbuild = "n/a"
 
@@ -86,32 +87,18 @@ def main():
                         tagged="untagged",
                     )
 
-                    method, path = d["r"].split(None, 1)
-                    path, protocol = path.rsplit(None, 1)
-                    d["method"] = method
-                    d["path"] = path
-                    d["query"] = urlparse.urlparse(path, "http").query
-                    d["data"] = urlparse.parse_qs(d["query"])
-                    if "tag" in d["data"]:
-                        record["tagged"] = "tagged"
-                    for k in [
-                        "result",
-                        "computer",
-                        "tag",
-                        "model",
-                        "osversion",
-                        "serial",
-                    ]:
-                        if k in d["data"]:
-                            record[k] = d["data"][k][0]
-                            del d["data"][k]
-                        else:
-                            record[k] = "n/a"
-                    record["computer"] = record["computer"].split(".")[0]
-                    record["serial"] = apostrophize_number_as_text(record["serial"])
+                    method, rest = d["r"].split(None, 1)
+                    path, rest = rest.rsplit(None, 1)
+                    query = urlparse.urlparse(path, "http").query
+                    data = urlparse.parse_qs(query)
 
-                    for k in d["data"].keys():
-                        record[k] = d["data"][k][0]
+                    for k in data.keys():
+                        v = data[k][0]
+                        if k == "tag":
+                            record["tagged"] = "tagged"
+                        elif k == "computer" and "." in v:
+                            v = v.split(".")[0]
+                        record[k] = apostrophize_number_as_text(v)
                         if not k in FIELD_LABELS:
                             print("** unexpected parameter:", k, file=sys.stderr)
                             FIELD_LABELS[k] = k
@@ -123,7 +110,7 @@ def main():
         print(unparsed_lines[0], file=sys.stderr)
         return 1
     if matched_lines:
-        writer = csv.DictWriter(sys.stdout, FIELD_LABELS.keys())
+        writer = csv.DictWriter(sys.stdout, FIELD_LABELS.keys(), restval="n/a")
         writer.writerow(FIELD_LABELS)
         writer.writerows(records)
     return 0
@@ -178,9 +165,10 @@ def parse(line):
     return d
 
 
+LOOKS_LIKE_A_NUMBER_RE = re.compile(r'^[-+]?[,.0-9]+$')
 def apostrophize_number_as_text(n):
     s = str(n).strip()
-    if len(s) > 0 and s[0] in "0123456789-+":
+    if LOOKS_LIKE_A_NUMBER_RE.match(s):
         return "'" + s
     else:
         return n
