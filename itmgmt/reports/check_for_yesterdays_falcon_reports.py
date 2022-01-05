@@ -1,14 +1,10 @@
-#!/usr/bin/env python
-from __future__ import print_function
-
 import collections
 import csv
 import datetime
 import re
 import subprocess
 import sys
-import urlparse
-
+from urllib.parse import urlparse
 
 FIELD_LABELS = collections.OrderedDict(
     [
