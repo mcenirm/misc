@@ -1,10 +1,12 @@
 import collections
 import csv
 import datetime
+import os
 import re
+import shutil
 import subprocess
 import sys
-from urllib.parse import urlparse
+import urllib.parse
 
 FIELD_LABELS = collections.OrderedDict(
     [
@@ -26,27 +28,16 @@ FIELD_LABELS = collections.OrderedDict(
 
 
 def main():
-    date_expression = "yesterday"
+    date_expression, access_log = determine_defaults()
     if len(sys.argv) > 1:
         date_expression = sys.argv[1]
-    date_filter = (
-        subprocess.Popen(
-            [
-                "date",
-                "-d",
-                date_expression,
-                "+%d/%b/%Y",
-            ],
-            stdout=subprocess.PIPE,
-        )
-        .communicate()[0]
-        .strip()
-    )
+    return run(date_expression, access_log)
 
+
+def run(date_expression, access_log, out=sys.stdout, err=sys.stderr):
+    date_filter = determine_date_filter(date_expression)
     today = datetime.date.today()
-    access_log = "{{ path to access log }}"
-    previous_log = access_log + "-" + today.strftime("%Y%m01")
-    current_log = access_log + "." + today.strftime("%Y_%b")
+    previous_log, current_log = determine_log_filenames(access_log, today)
 
     all_lines = []
     unparsed_lines = []
@@ -85,8 +76,8 @@ def main():
 
                     method, rest = d["r"].split(None, 1)
                     path, rest = rest.rsplit(None, 1)
-                    query = urlparse.urlparse(path, "http").query
-                    data = urlparse.parse_qs(query)
+                    query = urllib.parse.urlparse(path, "http").query
+                    data = urllib.parse.parse_qs(query)
 
                     for k in data.keys():
                         v = data[k][0]
@@ -96,20 +87,84 @@ def main():
                             v = v.split(".")[0]
                         record[k] = apostrophize_number_as_text(v)
                         if not k in FIELD_LABELS:
-                            print("** unexpected parameter:", k, file=sys.stderr)
+                            print("** unexpected parameter:", k, file=err)
                             FIELD_LABELS[k] = k
 
                     records.append(record)
         else:
             unparsed_lines.append(line)
     if unparsed_lines:
-        print(unparsed_lines[0], file=sys.stderr)
+        print(unparsed_lines[0], file=err)
         return 1
     if matched_lines:
-        writer = csv.DictWriter(sys.stdout, FIELD_LABELS.keys(), restval="n/a")
+        writer = csv.DictWriter(out, FIELD_LABELS.keys(), restval="n/a")
         writer.writerow(FIELD_LABELS)
         writer.writerows(records)
     return 0
+
+
+def determine_defaults():
+    config_file = find_config_file()
+    config = load_config_from_file(config_file)
+    date_expression = config.get("date_expression", "yesterday")
+    access_log = config["access_log"]
+    return date_expression, access_log
+
+
+def load_config_from_file(config_file):
+    config = {}
+    with open(config_file) as f:
+        lines = f.readlines()
+    for line in lines:
+        line = str(line).strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            name, value = line.split(":", 1)
+        except ValueError:
+            continue
+        name = name.strip()
+        value = value.strip()
+        config[name] = value
+    return config
+
+
+def find_config_file(app_name="falcon_reports"):
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if not config_home:
+        config_home = os.environ["HOME"] + "/.config"
+    config_file = config_home + "/" + app_name + ".cfg"
+    return config_file
+
+
+def find_gnu_date():
+    gdate = [_ for _ in ["gdate", "date"] if shutil.which(_)][0]
+    return gdate
+
+
+def determine_date_filter(date_expression):
+    gdate = find_gnu_date()
+    date_filter = (
+        subprocess.Popen(
+            [
+                gdate,
+                "-d",
+                date_expression,
+                "+%d/%b/%Y",
+            ],
+            stdout=subprocess.PIPE,
+            universal_newlines=True,
+        )
+        .communicate()[0]
+        .strip()
+    )
+    return date_filter
+
+
+def determine_log_filenames(access_log, today):
+    previous_log = access_log + "-" + today.strftime("%Y%m01")
+    current_log = access_log + "." + today.strftime("%Y_%b")
+    return previous_log, current_log
 
 
 def cat(*filenames):
@@ -161,7 +216,9 @@ def parse(line):
     return d
 
 
-LOOKS_LIKE_A_NUMBER_RE = re.compile(r'^[-+]?[,.0-9]+$')
+LOOKS_LIKE_A_NUMBER_RE = re.compile(r"^[-+]?[,.0-9]+$")
+
+
 def apostrophize_number_as_text(n):
     s = str(n).strip()
     if LOOKS_LIKE_A_NUMBER_RE.match(s):
