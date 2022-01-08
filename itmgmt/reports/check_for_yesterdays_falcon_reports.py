@@ -1,12 +1,16 @@
 import collections
+import configparser
 import csv
 import datetime
+import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
 import urllib.parse
+from pathlib import Path
+from typing import Any, List, Mapping, Tuple
 
 FIELD_LABELS = collections.OrderedDict(
     [
@@ -27,17 +31,51 @@ FIELD_LABELS = collections.OrderedDict(
 )
 
 
+CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES = ["access_log", "date_expression"]
+CHECK_FALCON_REPORTS_SETTINGS_SECTION_NAME = "settings"
+
+
+class CheckFalconReportsSettings:
+    access_log: Path
+    date_expression: str = "yesterday"
+
+    def __init__(self, name="check_falcon_reports", argv=[]):
+        self._name = name
+        config = configparser.ConfigParser()
+        files = guess_config_files(name)
+        logging.debug("files: " + repr(files))
+        config.read(files)
+        logging.debug(
+            "from files: "
+            + str(dict(config[CHECK_FALCON_REPORTS_SETTINGS_SECTION_NAME]))
+        )
+        args, kwargs = config_from_argv(argv)
+        logging.debug("from argv: " + str(args) + " " + str(kwargs))
+        combined = {**config[CHECK_FALCON_REPORTS_SETTINGS_SECTION_NAME], **kwargs}
+        for attrname in CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES:
+            if attrname in combined:
+                setattr(self, attrname, combined[attrname])
+        if args:
+            self.date_expression = args[0]
+        for attrname in CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES:
+            value = getattr(self, attrname)
+            logging.debug(attrname + ": " + str(value))
+
+
 def main():
-    date_expression, access_log = determine_defaults()
-    if len(sys.argv) > 1:
-        date_expression = sys.argv[1]
-    return run(date_expression, access_log)
+    # logging.basicConfig(level=logging.DEBUG)
+    settings = CheckFalconReportsSettings(argv=sys.argv)
+    return run(settings)
 
 
-def run(date_expression, access_log, out=sys.stdout, err=sys.stderr):
-    date_filter = determine_date_filter(date_expression)
+def run(
+    settings: CheckFalconReportsSettings,
+    out=sys.stdout,
+    err=sys.stderr,
+) -> int:
+    date_filter = determine_date_filter(settings.date_expression)
     today = datetime.date.today()
-    previous_log, current_log = determine_log_filenames(access_log, today)
+    previous_log, current_log = determine_log_filenames(settings.access_log, today)
 
     all_lines = []
     unparsed_lines = []
@@ -101,6 +139,54 @@ def run(date_expression, access_log, out=sys.stdout, err=sys.stderr):
         writer.writerow(FIELD_LABELS)
         writer.writerows(records)
     return 0
+
+
+def config_from_argv(argv: List[str]) -> Tuple[List[str], Mapping[str, Any]]:
+    argv = argv[1:]
+    kwargs = {}
+    args = []
+    while argv:
+        arg = argv.pop(0)
+        if arg == "--":
+            args = argv
+            break
+        if arg.startswith("-"):
+            arg = arg.lstrip("-")
+            if arg.startswith("no-"):
+                name = arg[3:]
+                value = False
+            elif "=" in arg:
+                name, value = arg.split("=", 1)
+            else:
+                value = True
+            name = name.replace("-", "_")
+            kwargs[name] = value
+        else:
+            args.append(arg)
+    return args, kwargs
+
+
+def guess_config_files(app_name: str) -> List[str]:
+    config_base = os.environ.get("XDG_CONFIG_HOME", os.environ["HOME"] + "/.config")
+    suffix = ("_" if "_" in app_name else "") + "config"
+    guesses = list(
+        filter(
+            bool,
+            [
+                os.environ.get(app_name.upper() + "_CONFIG"),
+                "/".join((config_base, app_name, "config")),
+                os.environ["HOME"] + "/." + app_name + suffix,
+            ],
+        )
+    )
+    return guesses
+
+
+# data_dir:   .local/share/{{NAME}}
+# config_dir: .config/{{NAME}}
+# cache_dir:  .cache/{{NAME}}
+# state_dir:  .local/state/{{NAME}}
+# log_dir:    .cache/{{NAME}}/log
 
 
 def determine_defaults():
