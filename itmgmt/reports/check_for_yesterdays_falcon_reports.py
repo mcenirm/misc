@@ -189,7 +189,7 @@ def run(
     if history.unparsed_lines:
         print(history.unparsed_lines[0], file=err)
         return 1
-    if history.matched_lines:
+    if history.records:
         writer = csv.DictWriter(out, Record.FIELD_LABELS.keys(), restval="n/a")
         writer.writerow(Record.FIELD_LABELS)
         writer.writerows(history.records)
