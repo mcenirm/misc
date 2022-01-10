@@ -183,7 +183,7 @@ def run(
     today = datetime.date.today()
     previous_log, current_log = determine_log_filenames(settings.access_log, today)
 
-    history = History(date_filter, err)
+    history = History(date_filter, err=err)
     history.read_records_from_logs(previous_log, current_log)
 
     if history.unparsed_lines:
