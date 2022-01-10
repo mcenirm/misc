@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import urllib.parse
+from enum import Flag, auto
 from pathlib import Path
 from typing import Any, List, Mapping, Tuple
 
@@ -61,36 +62,62 @@ class Record(dict):
     )
 
 
-def main():
-    # logging.basicConfig(level=logging.DEBUG)
-    settings = CheckFalconReportsSettings(argv=sys.argv)
-    return run(settings)
+class HistorySaveFlag(Flag):
+    RECORDS_ONLY = 0
+    MATCHED_LINES = auto()
+    UNMATCHED_LINES = auto()
+    PARSED_LINES = auto()
+    UNPARSED_LINES = auto()
+    ALL_LINES = MATCHED_LINES | UNMATCHED_LINES | PARSED_LINES | UNPARSED_LINES
 
 
-def run(
-    settings: CheckFalconReportsSettings,
-    out=sys.stdout,
-    err=sys.stderr,
-) -> int:
-    date_filter = determine_date_filter(settings.date_expression)
-    today = datetime.date.today()
-    previous_log, current_log = determine_log_filenames(settings.access_log, today)
+class History:
+    @property
+    def all_lines(self) -> List[str]:
+        return self._lines[HistorySaveFlag.ALL_LINES]
 
-    all_lines = []
-    unparsed_lines = []
-    parsed_lines = []
-    date_filter_lines = []
-    matched_lines = []
-    records = []
-    for line in cat(previous_log, current_log):
-        all_lines.append(line)
-        d = parse(line)
-        if d:
-            parsed_lines.append(d)
-            if d["t"].startswith(date_filter):
-                date_filter_lines.append(d)
-                if d["r"].lower().startswith("get /falcon-report.txt?"):
-                    matched_lines.append(d)
+    @property
+    def unparsed_lines(self) -> List[str]:
+        return self._lines[HistorySaveFlag.UNPARSED_LINES]
+
+    @property
+    def parsed_lines(self) -> List[str]:
+        return self._lines[HistorySaveFlag.PARSED_LINES]
+
+    @property
+    def matched_lines(self) -> List[str]:
+        return self._lines[HistorySaveFlag.MATCHED_LINES]
+
+    @property
+    def unmatched_lines(self) -> List[str]:
+        return self._lines[HistorySaveFlag.UNMATCHED_LINES]
+
+    @property
+    def records(self) -> List[Record]:
+        return self._records
+
+    def __init__(self, lines_to_save=HistorySaveFlag.RECORDS_ONLY, err=None) -> None:
+        self._lines = {}
+        for flag in HistorySaveFlag:
+            self._lines[flag] = []
+        self._records = self._lines[HistorySaveFlag.RECORDS_ONLY]
+        self.lines_to_save = lines_to_save
+        self.err = err
+
+    def _save_line(self, flag: HistorySaveFlag, line: str) -> None:
+        if (self.lines_to_save & flag) == flag:
+            self._lines[flag].append(line)
+
+    def read_records_from_logs(self, *logs):
+        for line in cat(*logs):
+            self._save_line(HistorySaveFlag.ALL_LINES, line)
+            d = parse(line)
+            if d:
+                self._save_line(HistorySaveFlag.PARSED_LINES, line)
+                if d["t"].startswith(self.date_filter) and d["r"].lower().startswith(
+                    "get /falcon-report.txt?"
+                ):
+                    self._save_line(HistorySaveFlag.MATCHED_LINES, line)
 
                     t_date, t_time = d["t"].split(":", 1)
                     t_time, t_zone = t_time.split(None, 1)
@@ -124,19 +151,42 @@ def run(
                             v = v.split(".")[0]
                         record[k] = apostrophize_number_as_text(v)
                         if not k in Record.FIELD_LABELS:
-                            print("** unexpected parameter:", k, file=err)
+                            if self.err:
+                                print("** unexpected parameter:", k, file=self.err)
                             Record.FIELD_LABELS[k] = k
 
-                    records.append(record)
-        else:
-            unparsed_lines.append(line)
-    if unparsed_lines:
-        print(unparsed_lines[0], file=err)
+                    self.records.append(record)
+                else:
+                    self._save_line(HistorySaveFlag.UNMATCHED_LINES, line)
+            else:
+                self._save_line(HistorySaveFlag.UNPARSED_LINES, line)
+
+
+def main():
+    # logging.basicConfig(level=logging.DEBUG)
+    settings = CheckFalconReportsSettings(argv=sys.argv)
+    return run(settings)
+
+
+def run(
+    settings: CheckFalconReportsSettings,
+    out=sys.stdout,
+    err=sys.stderr,
+) -> int:
+    date_filter = determine_date_filter(settings.date_expression)
+    today = datetime.date.today()
+    previous_log, current_log = determine_log_filenames(settings.access_log, today)
+
+    history = History(date_filter, err)
+    history.read_records_from_logs(previous_log, current_log)
+
+    if history.unparsed_lines:
+        print(history.unparsed_lines[0], file=err)
         return 1
-    if matched_lines:
+    if history.matched_lines:
         writer = csv.DictWriter(out, Record.FIELD_LABELS.keys(), restval="n/a")
         writer.writerow(Record.FIELD_LABELS)
-        writer.writerows(records)
+        writer.writerows(history.records)
     return 0
 
 
