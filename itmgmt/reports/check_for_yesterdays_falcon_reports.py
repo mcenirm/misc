@@ -127,10 +127,8 @@ class History:
 
                     t_date, t_time = d["t"].split(":", 1)
                     t_time, t_zone = t_time.split(None, 1)
-                    t_zone = apostrophize_number_as_text(t_zone)
 
                     lead, psbuild = d["user_agent"].rsplit("/", 1)
-                    psbuild = apostrophize_number_as_text(psbuild)
                     if not lead.lower().endswith("powershell"):
                         psbuild = "n/a"
 
@@ -155,7 +153,7 @@ class History:
                             record["tagged"] = "tagged"
                         elif k == "computer" and "." in v:
                             v = v.split(".")[0]
-                        record[k] = apostrophize_number_as_text(v)
+                        record[k] = v
                         if not k in Record.FIELD_LABELS:
                             if self.err:
                                 print("** unexpected parameter:", k, file=self.err)
@@ -192,7 +190,12 @@ def run(
     if history.records:
         writer = csv.DictWriter(out, Record.FIELD_LABELS.keys(), restval="n/a")
         writer.writerow(Record.FIELD_LABELS)
-        writer.writerows(history.records)
+        writer.writerows(
+            [
+                dict([(k, apostrophize_number_as_text(v)) for k, v in r.items()])
+                for r in history.records
+            ]
+        )
     return 0
 
 
