@@ -96,11 +96,17 @@ class History:
     def records(self) -> List[Record]:
         return self._records
 
-    def __init__(self, lines_to_save=HistorySaveFlag.RECORDS_ONLY, err=None) -> None:
+    def __init__(
+        self,
+        date_filter: str,
+        lines_to_save=HistorySaveFlag.RECORDS_ONLY,
+        err=None,
+    ) -> None:
         self._lines = {}
         for flag in HistorySaveFlag:
             self._lines[flag] = []
         self._records = self._lines[HistorySaveFlag.RECORDS_ONLY]
+        self.date_filter = date_filter
         self.lines_to_save = lines_to_save
         self.err = err
 
