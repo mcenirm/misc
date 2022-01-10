@@ -12,25 +12,6 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, List, Mapping, Tuple
 
-FIELD_LABELS = collections.OrderedDict(
-    [
-        ("result", "Result"),
-        ("computer", "Computer"),
-        ("ip", "IP"),
-        ("user", "User"),
-        ("date", "Date"),
-        ("time", "Time"),
-        ("zone", "Zone"),
-        ("psbuild", "PSBuild"),
-        ("tagged", "Tagged?"),
-        ("tag", "Tag"),
-        ("model", "Model"),
-        ("osversion", "OS"),
-        ("serial", "Serial"),
-    ]
-)
-
-
 CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES = ["access_log", "date_expression"]
 CHECK_FALCON_REPORTS_SETTINGS_SECTION_NAME = "settings"
 
@@ -60,6 +41,24 @@ class CheckFalconReportsSettings:
         for attrname in CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES:
             value = getattr(self, attrname)
             logging.debug(attrname + ": " + str(value))
+
+
+class Record(dict):
+    FIELD_LABELS = collections.OrderedDict(
+        result="Result",
+        computer="Computer",
+        ip="IP",
+        user="User",
+        date="Date",
+        time="Time",
+        zone="Zone",
+        psbuild="PSBuild",
+        tagged="Tagged?",
+        tag="Tag",
+        model="Model",
+        osversion="OS",
+        serial="Serial",
+    )
 
 
 def main():
@@ -102,7 +101,7 @@ def run(
                     if not lead.lower().endswith("powershell"):
                         psbuild = "n/a"
 
-                    record = dict(
+                    record = Record(
                         ip=d["h"],
                         user=d["u"],
                         date=t_date,
@@ -124,9 +123,9 @@ def run(
                         elif k == "computer" and "." in v:
                             v = v.split(".")[0]
                         record[k] = apostrophize_number_as_text(v)
-                        if not k in FIELD_LABELS:
+                        if not k in Record.FIELD_LABELS:
                             print("** unexpected parameter:", k, file=err)
-                            FIELD_LABELS[k] = k
+                            Record.FIELD_LABELS[k] = k
 
                     records.append(record)
         else:
@@ -135,8 +134,8 @@ def run(
         print(unparsed_lines[0], file=err)
         return 1
     if matched_lines:
-        writer = csv.DictWriter(out, FIELD_LABELS.keys(), restval="n/a")
-        writer.writerow(FIELD_LABELS)
+        writer = csv.DictWriter(out, Record.FIELD_LABELS.keys(), restval="n/a")
+        writer.writerow(Record.FIELD_LABELS)
         writer.writerows(records)
     return 0
 
