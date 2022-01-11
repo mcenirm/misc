@@ -188,15 +188,24 @@ def run(
         print(history.unparsed_lines[0], file=err)
         return 1
     if history.records:
-        writer = csv.DictWriter(out, Record.FIELD_LABELS.keys(), restval="n/a")
-        writer.writerow(Record.FIELD_LABELS)
-        writer.writerows(
-            [
-                dict([(k, apostrophize_number_as_text(v)) for k, v in r.items()])
-                for r in history.records
-            ]
-        )
+        write_records_as_csv(history.records, out=out)
     return 0
+
+
+def write_records_as_csv(
+    records: List[Record],
+    field_label_map: Mapping[str, str] = Record.FIELD_LABELS,
+    restval="n/a",
+    out=sys.stdout,
+)->None:
+    writer = csv.DictWriter(out, field_label_map.keys(), restval=restval)
+    writer.writerow(field_label_map)
+    writer.writerows(
+        [
+            dict([(k, apostrophize_number_as_text(v)) for k, v in r.items()])
+            for r in records
+        ]
+    )
 
 
 def config_from_argv(argv: List[str]) -> Tuple[List[str], Mapping[str, Any]]:
