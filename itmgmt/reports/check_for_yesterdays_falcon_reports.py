@@ -6,20 +6,26 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import urllib.parse
 from enum import Flag, auto
 from pathlib import Path
-from typing import Any, List, Mapping, Tuple
+from typing import Any, List, Mapping, Tuple, Union
 
-CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES = ["access_log", "date_expression"]
+CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES = [
+    "access_log",
+    "date_expression",
+    "database",
+]
 CHECK_FALCON_REPORTS_SETTINGS_SECTION_NAME = "settings"
 
 
 class CheckFalconReportsSettings:
     access_log: Path
     date_expression: str = "yesterday"
+    database: Union[str, bytes, os.PathLike[str], os.PathLike[bytes]]
 
     def __init__(self, name="check_falcon_reports", argv=[]):
         self._name = name
@@ -39,6 +45,8 @@ class CheckFalconReportsSettings:
                 setattr(self, attrname, combined[attrname])
         if args:
             self.date_expression = args[0]
+        if not getattr(self, "database", None):
+            self.database = guess_database_file(name)
         for attrname in CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES:
             value = getattr(self, attrname)
             logging.debug(attrname + ": " + str(value))
@@ -229,6 +237,7 @@ def run(
         return 1
     if history.records:
         write_records_as_csv(history.records, out=out)
+        update_database(settings.database, history.records)
     return 0
 
 
@@ -246,6 +255,13 @@ def write_records_as_csv(
             for r in records
         ]
     )
+
+
+def update_database(
+    database: Union[str, bytes, os.PathLike[str], os.PathLike[bytes]],
+    records: List[Record],
+) -> None:
+    c = sqlite3.connect(database)
 
 
 def config_from_argv(argv: List[str]) -> Tuple[List[str], Mapping[str, Any]]:
