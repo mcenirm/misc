@@ -197,6 +197,14 @@ class XDG:
     def config_file(app_name: str, config_file_name: str = "config") -> str:
         return XDG.config_dir(app_name) + "/" + config_file_name
 
+    @staticmethod
+    def state_base() -> str:
+        return XDG._base("XDG_STATE_HOME", ".local/state")
+
+    @staticmethod
+    def state_dir(app_name: str) -> str:
+        return XDG.state_base() + "/" + app_name
+
 
 def main():
     # logging.basicConfig(level=logging.DEBUG)
@@ -265,20 +273,43 @@ def config_from_argv(argv: List[str]) -> Tuple[List[str], Mapping[str, Any]]:
     return args, kwargs
 
 
-def guess_config_files(app_name: str) -> List[str]:
-    xdg_config_file = XDG.config_file(app_name)
-    suffix = ("_" if "_" in app_name else "") + "config"
-    guesses = list(
-        filter(
-            bool,
-            [
-                os.environ.get(app_name.upper() + "_CONFIG"),
-                xdg_config_file,
-                os.environ["HOME"] + "/." + app_name + suffix,
-            ],
-        )
-    )
+def guess_something_files(
+    app_name: str,
+    something_name: str,
+    ext: str = None,
+    specific_files: List[str] = [],
+) -> List[str]:
+    from_env = os.environ.get((app_name + "_" + something_name).upper())
+    if ext:
+        suffix = ext
+    else:
+        suffix = ("_" if "_" in app_name else "") + something_name
+    from_home = os.environ["HOME"] + "/." + app_name.lower() + suffix
+    guesses = list(filter(bool, [from_env, *specific_files, from_home]))
     return guesses
+
+
+def guess_config_files(app_name: str) -> List[str]:
+    return guess_something_files(
+        app_name,
+        "config",
+        specific_files=[XDG.config_file(app_name)],
+    )
+
+
+def guess_database_files(app_name: str) -> List[str]:
+    return guess_something_files(
+        app_name,
+        "db",
+        ext=".db",
+        specific_files=[(XDG.state_dir(app_name) + "history.db")],
+    )
+
+
+def guess_database_file(app_name: str) -> str:
+    guessed = guess_database_files(app_name)
+    existing = [_ for _ in guessed if Path(_).is_file()]
+    return (existing if existing else guessed)[0]
 
 
 def determine_defaults():
