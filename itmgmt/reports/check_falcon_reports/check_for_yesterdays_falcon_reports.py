@@ -21,11 +21,13 @@ CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES = [
 ]
 CHECK_FALCON_REPORTS_SETTINGS_SECTION_NAME = "settings"
 
+StrOrBytesPath = Union[str, bytes, "os.PathLike[str]", "os.PathLike[bytes]"]
+
 
 class CheckFalconReportsSettings:
     access_log: Path
     date_expression: str = "yesterday"
-    database: Union[str, bytes, "os.PathLike[str]", "os.PathLike[bytes]"]
+    database: StrOrBytesPath
 
     def __init__(self, name="check_falcon_reports", argv=[]):
         self._name = name
@@ -174,6 +176,20 @@ class History:
                 self._save_line(HistorySaveFlag.UNPARSED_LINES, line)
 
 
+class Database:
+    def __init__(self, database: StrOrBytesPath, column_names: List[str]) -> None:
+        self.database = database
+        if not str(database).startswith(":"):
+            Path(database).parent.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(database)
+        ensure_table_schema_matches(
+            self.connection, table_name="records", column_names=column_names
+        )
+
+    def upsert(self, records: List[Record]) -> None:
+        cur = self.connection.cursor()
+
+
 class XDG:
     """
     data_dir:     .local/share/{{NAME}}    $XDG_DATA_HOME/{{NAME}}
@@ -237,7 +253,8 @@ def run(
         return 1
     if history.records:
         write_records_as_csv(history.records, out=out)
-        update_database(settings.database, history.records)
+        db = Database(settings.database, Record.FIELD_LABELS.keys())
+        db.upsert(history.records)
     return 0
 
 
@@ -255,15 +272,6 @@ def write_records_as_csv(
             for r in records
         ]
     )
-
-
-def update_database(
-    database: Union[str, bytes, "os.PathLike[str]", "os.PathLike[bytes]"],
-    records: List[Record],
-) -> None:
-    if not str(database).startswith(":"):
-        Path(database).parent.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(database)
 
 
 def config_from_argv(argv: List[str]) -> Tuple[List[str], Mapping[str, Any]]:
@@ -452,6 +460,29 @@ def apostrophize_number_as_text(n):
         return "'" + s
     else:
         return n
+
+
+def ensure_table_schema_matches(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_names: List[str],
+) -> None:
+    cur = connection.cursor()
+    matching_tables = list(
+        cur.execute(
+            "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?",
+            table_name,
+        )
+    )
+    if not matching_tables:
+        # TODO create table
+        pass
+    elif len(matching_tables) > 1:
+        # TODO complain?
+        pass
+    else:
+        # TODO check columns
+        pass
 
 
 if __name__ == "__main__":
