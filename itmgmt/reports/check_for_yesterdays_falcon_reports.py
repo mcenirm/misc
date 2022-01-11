@@ -166,6 +166,38 @@ class History:
                 self._save_line(HistorySaveFlag.UNPARSED_LINES, line)
 
 
+class XDG:
+    """
+    data_dir:     .local/share/{{NAME}}    $XDG_DATA_HOME/{{NAME}}
+    config_dir:   .config/{{NAME}}         $XDG_CONFIG_HOME/{{NAME}}
+    cache_dir:    .cache/{{NAME}}          $XDG_CACHE_HOME/{{NAME}}
+    state_dir:    .local/state/{{NAME}}    $XDG_STATE_HOME/{{NAME}}
+    log_dir:      .cache/{{NAME}}/log
+    runtime_dir:                           $XDG_RUNTIME_DIR
+    """
+
+    @staticmethod
+    def _base(
+        xdg_env_var: str, base_dir_name: str, is_relative_to_home: bool = True
+    ) -> str:
+        default = base_dir_name
+        if is_relative_to_home:
+            default = os.environ["HOME"] + "/" + base_dir_name
+        return os.environ.get(xdg_env_var, default)
+
+    @staticmethod
+    def config_base() -> str:
+        return XDG._base("XDG_CONFIG_HOME", ".config")
+
+    @staticmethod
+    def config_dir(app_name: str) -> str:
+        return XDG.config_base() + "/" + app_name
+
+    @staticmethod
+    def config_file(app_name: str, config_file_name: str = "config") -> str:
+        return XDG.config_dir(app_name) + "/" + config_file_name
+
+
 def main():
     # logging.basicConfig(level=logging.DEBUG)
     settings = CheckFalconReportsSettings(argv=sys.argv)
@@ -197,7 +229,7 @@ def write_records_as_csv(
     field_label_map: Mapping[str, str] = Record.FIELD_LABELS,
     restval="n/a",
     out=sys.stdout,
-)->None:
+) -> None:
     writer = csv.DictWriter(out, field_label_map.keys(), restval=restval)
     writer.writerow(field_label_map)
     writer.writerows(
@@ -234,26 +266,19 @@ def config_from_argv(argv: List[str]) -> Tuple[List[str], Mapping[str, Any]]:
 
 
 def guess_config_files(app_name: str) -> List[str]:
-    config_base = os.environ.get("XDG_CONFIG_HOME", os.environ["HOME"] + "/.config")
+    xdg_config_file = XDG.config_file(app_name)
     suffix = ("_" if "_" in app_name else "") + "config"
     guesses = list(
         filter(
             bool,
             [
                 os.environ.get(app_name.upper() + "_CONFIG"),
-                "/".join((config_base, app_name, "config")),
+                xdg_config_file,
                 os.environ["HOME"] + "/." + app_name + suffix,
             ],
         )
     )
     return guesses
-
-
-# data_dir:   .local/share/{{NAME}}
-# config_dir: .config/{{NAME}}
-# cache_dir:  .cache/{{NAME}}
-# state_dir:  .local/state/{{NAME}}
-# log_dir:    .cache/{{NAME}}/log
 
 
 def determine_defaults():
