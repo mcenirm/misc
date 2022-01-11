@@ -261,6 +261,8 @@ def update_database(
     database: Union[str, bytes, "os.PathLike[str]", "os.PathLike[bytes]"],
     records: List[Record],
 ) -> None:
+    if not str(database).startswith(":"):
+        Path(database).parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(database)
 
 
@@ -318,7 +320,7 @@ def guess_database_files(app_name: str) -> List[str]:
         app_name,
         "db",
         ext=".db",
-        specific_files=[(XDG.state_dir(app_name) + "history.db")],
+        specific_files=[(XDG.state_dir(app_name) + "/history.db")],
     )
 
 
