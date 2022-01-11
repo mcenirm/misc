@@ -25,7 +25,7 @@ CHECK_FALCON_REPORTS_SETTINGS_SECTION_NAME = "settings"
 class CheckFalconReportsSettings:
     access_log: Path
     date_expression: str = "yesterday"
-    database: Union[str, bytes, os.PathLike[str], os.PathLike[bytes]]
+    database: Union[str, bytes, "os.PathLike[str]", "os.PathLike[bytes]"]
 
     def __init__(self, name="check_falcon_reports", argv=[]):
         self._name = name
@@ -258,7 +258,7 @@ def write_records_as_csv(
 
 
 def update_database(
-    database: Union[str, bytes, os.PathLike[str], os.PathLike[bytes]],
+    database: Union[str, bytes, "os.PathLike[str]", "os.PathLike[bytes]"],
     records: List[Record],
 ) -> None:
     c = sqlite3.connect(database)
