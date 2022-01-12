@@ -235,6 +235,7 @@ class Sqlite3Database(Database):
         sql = "SELECT name FROM {0:s} WHERE type = 'table' AND name = ?".format(
             schema_table_name
         )
+        logging.debug("does records table exist: %r", sql)
         matching_tables = ctx.execute(sql, (self.table_name,)).fetchall()
         if not matching_tables:
             return False
@@ -246,28 +247,26 @@ class Sqlite3Database(Database):
             )
         return True
 
-    def _create_records_table(self, cur: sqlite3.Cursor) -> None:
-        create_table_sql = "CREATE TABLE {0:s} ({1:s})".format(
+    def _create_records_table(self, ctx: sqlite3.Cursor) -> None:
+        sql = "CREATE TABLE {0:s} ({1:s})".format(
             self.table_name,
             ", ".join(["{0:s} TEXT".format(_) for _ in self.column_names]),
         )
-        logging.info("create records table sql: %r", create_table_sql)
-        cur.execute(create_table_sql)
+        logging.debug("create records table: %r", sql)
+        ctx.execute(sql)
 
     def _get_records_table_column_names(self, ctx: sqlite3.Cursor) -> List[str]:
-        check_columns_sql = "PRAGMA table_info('{0:s}')".format(self.table_name)
-        results = ctx.execute(check_columns_sql).fetchall()
-        logging.warning("columns for table: %s", self.table_name)
-        names = []
-        for r in results:
-            logging.warning("-- %r", r)
-            names.append(r[1])
+        sql = "PRAGMA table_info('{0:s}')".format(self.table_name)
+        logging.debug("get records table column names: %r", sql)
+        results = ctx.execute(sql).fetchall()
+        names = [_[1] for _ in results]
         return names
 
     def _add_records_column(self, ctx: sqlite3.Cursor, column_name: str) -> None:
         sql = "ALTER TABLE {0:s} ADD COLUMN {1:s} TEXT", format(
             self.table_name, column_name
         )
+        logging.debug("add records column: %r", sql)
         ctx.execute(sql)
 
     def _dispose_context(self, ctx: sqlite3.Cursor) -> None:
