@@ -490,11 +490,20 @@ def ensure_table_schema_matches(
     elif len(matching_tables) > 1:
         # TODO complain?
         logging.warning(
-            "more than 1 table (" + len(matching_tables) + "): " + table_name
+            "more than 1 table (" + str(len(matching_tables)) + "): " + table_name
         )
     else:
         # TODO check columns
         logging.warning("TODO check columns in table: " + table_name)
+        check_columns_sql = "PRAGMA table_info('" + table_name + "')"
+        results = cur.execute(check_columns_sql)
+        logging.warning("columns for table: " + table_name)
+        existing_column_names = []
+        for r in results:
+            logging.warning("-- " + repr(r))
+            existing_column_names.append(r[1])
+        missing_column_names = set(column_names).difference(set(existing_column_names))
+        logging.warning("missing: " + repr(missing_column_names))
 
 
 if __name__ == "__main__":
