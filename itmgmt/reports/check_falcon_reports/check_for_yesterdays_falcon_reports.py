@@ -263,7 +263,7 @@ class Sqlite3Database(Database):
         return names
 
     def _add_records_column(self, ctx: sqlite3.Cursor, column_name: str) -> None:
-        sql = "ALTER TABLE {0:s} ADD COLUMN {1:s} TEXT", format(
+        sql = "ALTER TABLE {0:s} ADD COLUMN {1:s} TEXT".format(
             self.table_name, column_name
         )
         logging.debug("add records column: %r", sql)
