@@ -321,7 +321,7 @@ def main():
     if len(argv) > 1 and argv[1] == "--debug":
         logging.basicConfig(level=logging.DEBUG)
         argv = argv[:1] + argv[2:]
-    settings = CheckFalconReportsSettings(argv)
+    settings = CheckFalconReportsSettings(argv=argv)
     return run(settings)
 
 
