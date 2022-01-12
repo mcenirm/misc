@@ -2,6 +2,7 @@ import collections
 import configparser
 import csv
 import datetime
+import hashlib
 import logging
 import os
 import re
@@ -13,6 +14,8 @@ import urllib.parse
 from enum import Flag, auto
 from pathlib import Path
 from typing import Any, Iterable, List, Mapping, Tuple, Union
+
+FINGERPRINT = hashlib.sha256(open(__file__, "br").read()).digest()
 
 CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES = [
     "access_log",
@@ -54,6 +57,7 @@ class CheckFalconReportsSettings:
 
 
 class Record(dict):
+    KEY_FIELDS = ("computer", "ip", "date", "time", "zone")
     FIELD_LABELS = collections.OrderedDict(
         result="Result",
         computer="Computer",
