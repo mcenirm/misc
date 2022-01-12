@@ -415,7 +415,7 @@ def guess_database_files(app_name: str) -> List[str]:
         app_name,
         "db",
         ext=".db",
-        specific_files=[os.path.join((XDG.state_dir(app_name), "history.db"))],
+        specific_files=[os.path.join(XDG.state_dir(app_name), "history.db")],
     )
 
 
