@@ -11,11 +11,13 @@ param (
     $LauncherDir = "$PSScriptRoot\cisco-asdm"
     ,
     [string]
-    $SocksProxyHost = $null
+    $SocksProxyHost = ''
     ,
     [int]
-    $SocksProxyPort = $null
+    $SocksProxyPort = 0
 )
+
+$ErrorActionPreference = 'stop'
 
 $JavaExe = 'C:\B\jdk8u302-b08-jre\bin\java.exe'
 $LauncherMainClass = 'com.cisco.launcher.Launcher'
@@ -23,26 +25,25 @@ $LauncherMainJar = 'asdm-launcher.jar'
 $LauncherMoreJars = @('lzma.jar', 'jploader.jar', 'retroweaver-rt-2.0.jar')
 $JavaOpts = @('-Xms64m', '-Xmx512m', '-Dsun.swing.enableImprovedDragGesture=true')
 
-if ($SocksProxyHost -ne $null) {
+if ($SocksProxyHost) {
     $JavaOpts += "-DsocksProxyHost=$($SocksProxyHost)"
 }
 
-if ($SocksProxyPort -ne $null) {
+if ($SocksProxyPort -gt 0) {
     $JavaOpts += "-DsocksProxyPort=$($SocksProxyPort)"
 }
 
 $asjar = $true
 
-$cmdpart1 = @( $JavaExe ) + $JavaOpts
+$ArgumentList = $JavaOpts
 if ($asjar) {
-    $cmdpart2 = @('-classpath', ($LauncherMoreJars -join ';'), '-jar', $LauncherMainJar)
+    $ArgumentList += @('-classpath', ($LauncherMoreJars -join ';'), '-jar', $LauncherMainJar)
 }
 else {
-    $cmdpart2 = @('-classpath', (($LauncherMoreJars + @($LauncherMainJar)) -join ';'), $LauncherMainClass)
+    $ArgumentList += @('-classpath', (($LauncherMoreJars + @($LauncherMainJar)) -join ';'), $LauncherMainClass)
 }
-$cmdpart3 = $args
+$ArgumentList += $args
 
-$cmd = $cmdpart1 + $cmdpart2 + $cmdpart3
-$cmd | Out-GridView
+@($JavaExe) + $ArgumentList | Out-GridView
 
-& ($cmd | Select-Object -First 1) ($cmd | Select-Object -Skip 1)
+Start-Process -FilePath $JavaExe -ArgumentList $ArgumentList -WorkingDirectory $LauncherDir
