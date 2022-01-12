@@ -197,10 +197,16 @@ class Sqlite3Database(Database):
         self.connection = sqlite3.connect(self.database)
 
     def _ensure_table_schema(self):
+        if sqlite3.sqlite_version_info < (3, 30, 0):
+            schema_table_name = "sqlite_master"
+        else:
+            schema_table_name = "sqlite_schema"
         cur = self.connection.cursor()
         matching_tables = list(
             cur.execute(
-                "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?",
+                "SELECT name FROM "
+                + schema_table_name
+                + " WHERE type = 'table' AND name = ?",
                 (self.table_name,),
             )
         )
