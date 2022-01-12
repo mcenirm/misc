@@ -165,7 +165,7 @@ class History:
                         record[k] = v
                         if not k in Record.FIELD_LABELS:
                             if self.err:
-                                print("** unexpected parameter:", k, file=self.err)
+                                print("## unexpected parameter:", k, file=self.err)
                             Record.FIELD_LABELS[k] = k
 
                     self.records.append(record)
@@ -317,7 +317,10 @@ class XDG:
 
 
 def main():
-    # logging.basicConfig(level=logging.DEBUG)
+    argv = sys.argv
+    if len(argv > 1) and argv[1] == "--debug":
+        logging.basicConfig(level=logging.DEBUG)
+        argv = argv[0] + argv[2:]
     settings = CheckFalconReportsSettings(argv=sys.argv)
     return run(settings)
 
