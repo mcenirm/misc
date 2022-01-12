@@ -12,7 +12,7 @@ import sys
 import urllib.parse
 from enum import Flag, auto
 from pathlib import Path
-from typing import Any, List, Mapping, Tuple, Union
+from typing import Any, Iterable, List, Mapping, Tuple, Union
 
 CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES = [
     "access_log",
@@ -33,14 +33,13 @@ class CheckFalconReportsSettings:
         self._name = name
         config = configparser.ConfigParser()
         files = guess_config_files(name)
-        logging.debug("files: " + repr(files))
+        logging.debug("files: %r", files)
         config.read(files)
         logging.debug(
-            "from files: "
-            + str(dict(config[CHECK_FALCON_REPORTS_SETTINGS_SECTION_NAME]))
+            "from files: %s", dict(config[CHECK_FALCON_REPORTS_SETTINGS_SECTION_NAME])
         )
         args, kwargs = config_from_argv(argv)
-        logging.debug("from argv: " + str(args) + " " + str(kwargs))
+        logging.debug("from argv: %r %r ", args, kwargs)
         combined = {**config[CHECK_FALCON_REPORTS_SETTINGS_SECTION_NAME], **kwargs}
         for attrname in CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES:
             if attrname in combined:
@@ -51,7 +50,7 @@ class CheckFalconReportsSettings:
             self.database = guess_database_file(name)
         for attrname in CHECK_FALCON_REPORTS_SETTINGS_ATTRIBUTE_NAMES:
             value = getattr(self, attrname)
-            logging.debug(attrname + ": " + str(value))
+            logging.debug("%s: %s", attrname, value)
 
 
 class Record(dict):
@@ -177,14 +176,70 @@ class History:
 
 
 class Database:
+    def __init__(self, column_names: List[str]) -> None:
+        self.table_name = "records"
+        self.column_names = column_names
+
+    def upsert(self, records: List[Record]) -> None:
+        raise NotImplementedError()
+
+
+class Sqlite3Database(Database):
     def __init__(self, database: StrOrBytesPath, column_names: List[str]) -> None:
+        super().__init__(column_names)
         self.database = database
-        if not str(database).startswith(":"):
-            Path(database).parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(database)
-        ensure_table_schema_matches(
-            self.connection, table_name="records", column_names=column_names
+        self._connect()
+        self._ensure_table_schema()
+
+    def _connect(self):
+        if not str(self.database).startswith(":"):
+            Path(self.database).parent.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(self.database)
+
+    def _ensure_table_schema(self):
+        cur = self.connection.cursor()
+        matching_tables = list(
+            cur.execute(
+                "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?",
+                (self.table_name,),
+            )
         )
+        if not matching_tables:
+            logging.warning("no table: %s", self.table_name)
+            self._create_table(cur)
+        elif len(matching_tables) > 1:
+            # TODO complain?
+            logging.warning(
+                "expected 1 table, got %d: %s", len(matching_tables), self.table_name
+            )
+        else:
+            # TODO check columns
+            logging.warning("TODO check columns in table: %s", self.table_name)
+            check_columns_sql = "PRAGMA table_info('" + self.table_name + "')"
+            results = cur.execute(check_columns_sql)
+            logging.warning("columns for table: %s", self.table_name)
+            existing_column_names = []
+            for r in results:
+                logging.warning("-- %r", r)
+                existing_column_names.append(r[1])
+            missing_column_names = set(self.column_names).difference(
+                set(existing_column_names)
+            )
+            logging.warning("missing: %r", missing_column_names)
+        cur.close()
+
+    def _create_table(self, cur: sqlite3.Cursor):
+        # TODO create table
+        create_table_sql = (
+            "CREATE TABLE "
+            + self.table_name
+            + "("
+            + ", ".join([_ + " TEXT" for _ in self.column_names])
+            + ")"
+        )
+        logging.warning("create table sql: %r", create_table_sql)
+        results = cur.execute(create_table_sql)
+        logging.warning("create table results: %r", results)
 
     def upsert(self, records: List[Record]) -> None:
         cur = self.connection.cursor()
@@ -253,7 +308,7 @@ def run(
         return 1
     if history.records:
         write_records_as_csv(history.records, out=out)
-        db = Database(settings.database, Record.FIELD_LABELS.keys())
+        db = Sqlite3Database(settings.database, Record.FIELD_LABELS.keys())
         db.upsert(history.records)
     return 0
 
@@ -460,50 +515,6 @@ def apostrophize_number_as_text(n):
         return "'" + s
     else:
         return n
-
-
-def ensure_table_schema_matches(
-    connection: sqlite3.Connection,
-    table_name: str,
-    column_names: List[str],
-) -> None:
-    cur = connection.cursor()
-    matching_tables = list(
-        cur.execute(
-            "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?",
-            (table_name,),
-        )
-    )
-    if not matching_tables:
-        # TODO create table
-        logging.warning("no table: " + table_name)
-        create_table_sql = (
-            "CREATE TABLE "
-            + table_name
-            + "("
-            + ", ".join([_ + " TEXT" for _ in column_names])
-            + ")"
-        )
-        logging.warning("create table sql: " + repr(create_table_sql))
-        results = cur.execute(create_table_sql)
-        logging.warning("create table results: " + repr(results))
-    elif len(matching_tables) > 1:
-        # TODO complain?
-        logging.warning(
-            "more than 1 table (" + str(len(matching_tables)) + "): " + table_name
-        )
-    else:
-        # TODO check columns
-        logging.warning("TODO check columns in table: " + table_name)
-        check_columns_sql = "PRAGMA table_info('" + table_name + "')"
-        results = cur.execute(check_columns_sql)
-        logging.warning("columns for table: " + table_name)
-        existing_column_names = []
-        for r in results:
-            logging.warning("-- " + repr(r))
-            existing_column_names.append(r[1])
-        missing_column_names = set(column_names).difference(set(existing_column_names))
-        logging.warning("missing: " + repr(missing_column_names))
 
 
 if __name__ == "__main__":
