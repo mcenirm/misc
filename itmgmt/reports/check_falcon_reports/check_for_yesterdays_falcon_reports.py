@@ -471,18 +471,30 @@ def ensure_table_schema_matches(
     matching_tables = list(
         cur.execute(
             "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?",
-            table_name,
+            (table_name,),
         )
     )
     if not matching_tables:
         # TODO create table
-        pass
+        logging.warning("no table: " + table_name)
+        create_table_sql = (
+            "CREATE TABLE "
+            + table_name
+            + "("
+            + ", ".join([_ + " TEXT" for _ in column_names])
+            + ")"
+        )
+        logging.warning("create table sql: " + repr(create_table_sql))
+        results = cur.execute(create_table_sql)
+        logging.warning("create table results: " + repr(results))
     elif len(matching_tables) > 1:
         # TODO complain?
-        pass
+        logging.warning(
+            "more than 1 table (" + len(matching_tables) + "): " + table_name
+        )
     else:
         # TODO check columns
-        pass
+        logging.warning("TODO check columns in table: " + table_name)
 
 
 if __name__ == "__main__":
