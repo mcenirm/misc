@@ -180,6 +180,34 @@ class Database:
         self.table_name = "records"
         self.column_names = column_names
 
+    def _repair_records_schema(self):
+        ctx = self._new_context()
+        if not self._does_records_table_exist(ctx):
+            self._create_records_table(ctx)
+        existings = self._get_records_table_column_names(ctx)
+        missings = set(self.column_names).difference(set(existings))
+        for missing in missings:
+            self._add_records_column(ctx, missing)
+        self._dispose_context(ctx)
+
+    def _new_context(self) -> Any:
+        raise NotImplementedError()
+
+    def _does_records_table_exist(self, ctx: Any) -> bool:
+        raise NotImplementedError()
+
+    def _create_records_table(self, ctx: Any) -> None:
+        raise NotImplementedError()
+
+    def _get_records_table_column_names(self, ctx: Any) -> List[str]:
+        raise NotImplementedError()
+
+    def _add_records_column(self, ctx: Any, column_name: str) -> None:
+        raise NotImplementedError()
+
+    def _dispose_context(self, ctx: Any) -> None:
+        raise NotImplementedError()
+
     def upsert(self, records: List[Record]) -> None:
         raise NotImplementedError()
 
@@ -189,63 +217,61 @@ class Sqlite3Database(Database):
         super().__init__(column_names)
         self.database = database
         self._connect()
-        self._ensure_table_schema()
+        self._repair_records_schema()
 
     def _connect(self):
         if not str(self.database).startswith(":"):
             Path(self.database).parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(self.database)
 
-    def _ensure_table_schema(self):
+    def _new_context(self) -> sqlite3.Cursor:
+        return self.connection.cursor()
+
+    def _does_records_table_exist(self, ctx: sqlite3.Cursor) -> bool:
         if sqlite3.sqlite_version_info < (3, 30, 0):
             schema_table_name = "sqlite_master"
         else:
             schema_table_name = "sqlite_schema"
-        cur = self.connection.cursor()
-        matching_tables = list(
-            cur.execute(
-                "SELECT name FROM "
-                + schema_table_name
-                + " WHERE type = 'table' AND name = ?",
-                (self.table_name,),
-            )
+        sql = "SELECT name FROM {0:s} WHERE type = 'table' AND name = ?".format(
+            schema_table_name
         )
+        matching_tables = ctx.execute(sql, (self.table_name,)).fetchall()
         if not matching_tables:
-            logging.warning("no table: %s", self.table_name)
-            self._create_table(cur)
-        elif len(matching_tables) > 1:
-            # TODO complain?
+            return False
+        if len(matching_tables) > 1:
             logging.warning(
-                "expected 1 table, got %d: %s", len(matching_tables), self.table_name
+                "expected 1 records table, got %d: %s",
+                len(matching_tables),
+                self.table_name,
             )
-        else:
-            # TODO check columns
-            logging.warning("TODO check columns in table: %s", self.table_name)
-            check_columns_sql = "PRAGMA table_info('" + self.table_name + "')"
-            results = cur.execute(check_columns_sql)
-            logging.warning("columns for table: %s", self.table_name)
-            existing_column_names = []
-            for r in results:
-                logging.warning("-- %r", r)
-                existing_column_names.append(r[1])
-            missing_column_names = set(self.column_names).difference(
-                set(existing_column_names)
-            )
-            logging.warning("missing: %r", missing_column_names)
-        cur.close()
+        return True
 
-    def _create_table(self, cur: sqlite3.Cursor):
-        # TODO create table
-        create_table_sql = (
-            "CREATE TABLE "
-            + self.table_name
-            + "("
-            + ", ".join([_ + " TEXT" for _ in self.column_names])
-            + ")"
+    def _create_records_table(self, cur: sqlite3.Cursor) -> None:
+        create_table_sql = "CREATE TABLE {0:s} ({1:s})".format(
+            self.table_name,
+            ", ".join(["{0:s} TEXT".format(_) for _ in self.column_names]),
         )
-        logging.warning("create table sql: %r", create_table_sql)
-        results = cur.execute(create_table_sql)
-        logging.warning("create table results: %r", results)
+        logging.info("create records table sql: %r", create_table_sql)
+        cur.execute(create_table_sql)
+
+    def _get_records_table_column_names(self, ctx: sqlite3.Cursor) -> List[str]:
+        check_columns_sql = "PRAGMA table_info('{0:s}')".format(self.table_name)
+        results = ctx.execute(check_columns_sql).fetchall()
+        logging.warning("columns for table: %s", self.table_name)
+        names = []
+        for r in results:
+            logging.warning("-- %r", r)
+            names.append(r[1])
+        return names
+
+    def _add_records_column(self, ctx: sqlite3.Cursor, column_name: str) -> None:
+        sql = "ALTER TABLE {0:s} ADD COLUMN {1:s} TEXT", format(
+            self.table_name, column_name
+        )
+        ctx.execute(sql)
+
+    def _dispose_context(self, ctx: sqlite3.Cursor) -> None:
+        ctx.close()
 
     def upsert(self, records: List[Record]) -> None:
         cur = self.connection.cursor()
@@ -267,7 +293,7 @@ class XDG:
     ) -> str:
         default = base_dir_name
         if is_relative_to_home:
-            default = os.environ["HOME"] + "/" + base_dir_name
+            default = os.path.join(os.environ["HOME"], base_dir_name)
         return os.environ.get(xdg_env_var, default)
 
     @staticmethod
@@ -276,19 +302,19 @@ class XDG:
 
     @staticmethod
     def config_dir(app_name: str) -> str:
-        return XDG.config_base() + "/" + app_name
+        return os.path.join(XDG.config_base(), app_name)
 
     @staticmethod
     def config_file(app_name: str, config_file_name: str = "config") -> str:
-        return XDG.config_dir(app_name) + "/" + config_file_name
+        return os.path.join(XDG.config_dir(app_name), config_file_name)
 
     @staticmethod
     def state_base() -> str:
-        return XDG._base("XDG_STATE_HOME", ".local/state")
+        return XDG._base("XDG_STATE_HOME", os.path.join(".local", "state"))
 
     @staticmethod
     def state_dir(app_name: str) -> str:
-        return XDG.state_base() + "/" + app_name
+        return os.path.join(XDG.state_base(), app_name)
 
 
 def main():
@@ -371,7 +397,7 @@ def guess_something_files(
         suffix = ext
     else:
         suffix = ("_" if "_" in app_name else "") + something_name
-    from_home = os.environ["HOME"] + "/." + app_name.lower() + suffix
+    from_home = os.path.join(os.environ["HOME"], "." + app_name.lower() + suffix)
     guesses = list(filter(bool, [from_env, *specific_files, from_home]))
     return guesses
 
@@ -389,7 +415,7 @@ def guess_database_files(app_name: str) -> List[str]:
         app_name,
         "db",
         ext=".db",
-        specific_files=[(XDG.state_dir(app_name) + "/history.db")],
+        specific_files=[os.path.join((XDG.state_dir(app_name), "history.db"))],
     )
 
 
@@ -428,8 +454,8 @@ def load_config_from_file(config_file):
 def find_config_file(app_name="falcon_reports"):
     config_home = os.environ.get("XDG_CONFIG_HOME")
     if not config_home:
-        config_home = os.environ["HOME"] + "/.config"
-    config_file = config_home + "/" + app_name + ".cfg"
+        config_home = os.path.join(os.environ["HOME"], ".config")
+    config_file = os.path.join(config_home, app_name + ".cfg")
     return config_file
 
 
