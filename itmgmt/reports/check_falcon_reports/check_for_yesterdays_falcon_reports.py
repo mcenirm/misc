@@ -304,6 +304,7 @@ class Sqlite3Database(Database):
                 for record in records
             ],
         )
+        self.connection.commit()
         ctx.close()
 
 
