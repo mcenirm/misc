@@ -147,6 +147,7 @@ class History:
 
                     record = Record(
                         recordid="{0}:{1}".format(lognames[log_filename], line_no),
+                        timestamp=d["dt"],
                         ip=d["h"],
                         user=d["u"],
                         date=t_date,
@@ -575,6 +576,9 @@ def parse(line):
     m = COMBINED_LOG_RE.match(line)
     if m:
         d = m.groupdict()
+        d["dt"] = datetime.datetime.strptime(
+            " ".join([d[_] for _ in "dtz"]), "%d/%b/%Y %H:%M:%S %z"
+        )
     return d
 
 
