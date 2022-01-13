@@ -280,7 +280,23 @@ class Sqlite3Database(Database):
         ctx.close()
 
     def upsert(self, records: List[Record]) -> None:
-        cur = self.connection.cursor()
+        sql = "INSERT INTO {0}({1}{2}) VALUES(?{4}) ON CONFLICT({1}) DO UPDATE SET {5}".format(
+            self.table_name,
+            self.pk_name,
+            [",{0}".format(_) for _ in self.column_names],
+            ",?" * len(self.column_names),
+            ",".join(["{0}=excluded.{0}".format(_) for _ in self.column_names]),
+        )
+        logging.debug("upsert: %r", sql)
+        ctx = self._new_context()
+        ctx.executemany(
+            sql,
+            [
+                [record[self.pk_name]] + [record[_] for _ in self.column_names]
+                for record in records
+            ],
+        )
+        ctx.close()
 
 
 class XDG:
