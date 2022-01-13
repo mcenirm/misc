@@ -185,6 +185,7 @@ class Database:
     def __init__(self, column_names: List[str]) -> None:
         self.table_name = "records"
         self.pk_name = "recordid"
+        self.ts_name = "timestamp"
         self.column_names = column_names
 
     def _repair_records_schema(self):
@@ -229,7 +230,10 @@ class Sqlite3Database(Database):
     def _connect(self):
         if not str(self.database).startswith(":"):
             Path(self.database).parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.database)
+        self.connection = sqlite3.connect(
+            self.database,
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+        )
 
     def _new_context(self) -> sqlite3.Cursor:
         return self.connection.cursor()
@@ -255,10 +259,13 @@ class Sqlite3Database(Database):
         return True
 
     def _create_records_table(self, ctx: sqlite3.Cursor) -> None:
-        sql = "CREATE TABLE {0:s} ({1:s} TEXT PRIMARY KEY{2:s})".format(
-            self.table_name,
-            self.pk_name,
-            "".join([", {0:s} TEXT".format(_) for _ in self.column_names]),
+        sql = (
+            "CREATE TABLE {0:s} ({1:s} TEXT PRIMARY KEY, {2:s} TIMESTAMP{3:s})".format(
+                self.table_name,
+                self.pk_name,
+                self.ts_name,
+                "".join([", {0:s} TEXT".format(_) for _ in self.column_names]),
+            )
         )
         logging.debug("create records table: %r", sql)
         ctx.execute(sql)
@@ -281,11 +288,12 @@ class Sqlite3Database(Database):
         ctx.close()
 
     def upsert(self, records: List[Record]) -> None:
-        sql_center = "INTO {0}({1}{2}) VALUES(?{3})".format(
+        non_pk_names = [self.ts_name] + self.column_names
+        names = [self.pk_name] + non_pk_names
+        sql_center = "INTO {0}({1}) VALUES({3})".format(
             self.table_name,
-            self.pk_name,
-            "".join([",{0}".format(_) for _ in self.column_names]),
-            ",?" * len(self.column_names),
+            ",".join(names),
+            ",".join(["?"] * len(names)),
         )
         if sqlite3.sqlite_version_info < (3, 24, 0):
             sql = "INSERT OR REPLACE {0}".format(sql_center)
@@ -293,20 +301,14 @@ class Sqlite3Database(Database):
             sql = "INSERT {0} ON CONFLICT({1}) DO UPDATE SET {2}".format(
                 sql_center,
                 self.pk_name,
-                ",".join(["{0}=excluded.{0}".format(_) for _ in self.column_names]),
+                ",".join(["{0}=excluded.{0}".format(_) for _ in non_pk_names]),
             )
         logging.debug("upsert: %r", sql)
-        ctx = self._new_context()
-        ctx.executemany(
-            sql,
-            [
-                [record[self.pk_name]]
-                + [record.get(_, None) for _ in self.column_names]
-                for record in records
-            ],
-        )
-        self.connection.commit()
-        ctx.close()
+        with self.connection:
+            self.connection.executemany(
+                sql,
+                [[record.get(_, None) for _ in names] for record in records],
+            )
 
 
 class XDG:
