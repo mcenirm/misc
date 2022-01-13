@@ -365,12 +365,12 @@ def run(
     out=sys.stdout,
     err=sys.stderr,
 ) -> int:
-    date_filter = determine_date_filter(settings.date_expression)
-    today = datetime.date.today()
-    previous_log, current_log = determine_log_filenames(settings.access_log, today)
+    date_of_interest = get_date_for_expression(settings.date_expression)
+    date_filter = determine_date_filter(date_of_interest)
+    logs = determine_log_filenames(settings.access_log, date_of_interest)
 
     history = History(date_filter, err=err)
-    history.read_records_from_logs(previous_log, current_log)
+    history.read_records_from_logs(*logs)
 
     if history.unparsed_lines:
         print(history.unparsed_lines[0], file=err)
@@ -507,9 +507,13 @@ def find_gnu_date():
     return gdate
 
 
-def determine_date_filter(date_expression):
+def determine_date_filter(date: datetime.date) -> str:
+    return date.strftime("%d/%b/%Y")
+
+
+def get_date_for_expression(date_expression: str) -> datetime.date:
     gdate = find_gnu_date()
-    date_filter = (
+    dd_mm_yyyy = (
         subprocess.Popen(
             [
                 gdate,
@@ -523,13 +527,17 @@ def determine_date_filter(date_expression):
         .communicate()[0]
         .strip()
     )
-    return date_filter
+    return datetime.datetime.strptime(dd_mm_yyyy, "%d/%b/%Y").date()
 
 
-def determine_log_filenames(access_log, today):
-    previous_log = access_log + "-" + today.strftime("%Y%m01")
-    current_log = access_log + "." + today.strftime("%Y_%b")
-    return previous_log, current_log
+def determine_log_filenames(access_log: str, today: datetime.date) -> Tuple[str, str]:
+    yesterday = today - datetime.timedelta(days=1)
+    logs = [
+        "{0}.{1}".format((access_log, _.strftime("%Y_%b"))) for _ in (yesterday, today)
+    ]
+    if logs[0] == logs[1]:
+        del logs[1]
+    return tuple(logs)
 
 
 def lines_from_log_files(*filenames) -> Tuple[str, int, str]:
