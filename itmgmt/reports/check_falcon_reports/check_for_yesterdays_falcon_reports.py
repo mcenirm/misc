@@ -290,7 +290,7 @@ class Sqlite3Database(Database):
     def upsert(self, records: List[Record]) -> None:
         non_pk_names = [self.ts_name] + self.column_names
         names = [self.pk_name] + non_pk_names
-        sql_center = "INTO {0}({1}) VALUES({3})".format(
+        sql_center = "INTO {0}({1}) VALUES({2})".format(
             self.table_name,
             ",".join(names),
             ",".join(["?"] * len(names)),
