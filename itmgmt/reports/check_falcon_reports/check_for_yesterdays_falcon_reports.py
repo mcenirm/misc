@@ -280,13 +280,20 @@ class Sqlite3Database(Database):
         ctx.close()
 
     def upsert(self, records: List[Record]) -> None:
-        sql = "INSERT INTO {0}({1}{2}) VALUES(?{3}) ON CONFLICT({1}) DO UPDATE SET {4}".format(
+        sql_center = "INTO {0}({1}{2}) VALUES(?{3})".format(
             self.table_name,
             self.pk_name,
             "".join([",{0}".format(_) for _ in self.column_names]),
             ",?" * len(self.column_names),
-            ",".join(["{0}=excluded.{0}".format(_) for _ in self.column_names]),
         )
+        if sqlite3.sqlite_version_info < (3, 24, 0):
+            sql = "INSERT OR REPLACE {0}".format(sql_center)
+        else:
+            sql = "INSERT {0} ON CONFLICT({1}) DO UPDATE SET {2}".format(
+                sql_center,
+                self.pk_name,
+                ",".join(["{0}=excluded.{0}".format(_) for _ in self.column_names]),
+            )
         logging.debug("upsert: %r", sql)
         ctx = self._new_context()
         ctx.executemany(
