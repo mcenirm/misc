@@ -57,7 +57,6 @@ class CheckFalconReportsSettings:
 
 
 class Record(dict):
-    KEY_FIELDS = ("computer", "ip", "date", "time", "zone")
     FIELD_LABELS = collections.OrderedDict(
         result="Result",
         computer="Computer",
@@ -128,6 +127,7 @@ class History:
             self._lines[flag].append(line)
 
     def read_records_from_logs(self, *logs):
+        lognames = dict([(_, os.path.basename(_)) for _ in logs])
         for line, line_no, log_filename in lines_from_log_files(*logs):
             self._save_line(HistorySaveFlag.ALL_LINES, line)
             d = parse(line)
@@ -146,8 +146,7 @@ class History:
                         psbuild = "n/a"
 
                     record = Record(
-                        _line_no=line_no,
-                        _log_filename=log_filename,
+                        recordid="{0}:{1}".format(lognames[log_filename], line_no),
                         ip=d["h"],
                         user=d["u"],
                         date=t_date,
@@ -184,6 +183,7 @@ class History:
 class Database:
     def __init__(self, column_names: List[str]) -> None:
         self.table_name = "records"
+        self.pk_name = "recordid"
         self.column_names = column_names
 
     def _repair_records_schema(self):
@@ -254,9 +254,10 @@ class Sqlite3Database(Database):
         return True
 
     def _create_records_table(self, ctx: sqlite3.Cursor) -> None:
-        sql = "CREATE TABLE {0:s} ({1:s})".format(
+        sql = "CREATE TABLE {0:s} ({1:s} TEXT PRIMARY KEY{2:s})".format(
             self.table_name,
-            ", ".join(["{0:s} TEXT".format(_) for _ in self.column_names]),
+            self.pk_name,
+            "".join([", {0:s} TEXT".format(_) for _ in self.column_names]),
         )
         logging.debug("create records table: %r", sql)
         ctx.execute(sql)
