@@ -13,7 +13,7 @@ import sys
 import urllib.parse
 from enum import Flag, auto
 from pathlib import Path
-from typing import Any, Iterable, List, Mapping, Tuple, Union
+from typing import Any, List, Mapping, Tuple, Union
 
 FINGERPRINT = hashlib.sha256(open(__file__, "br").read()).digest()
 
@@ -128,7 +128,7 @@ class History:
             self._lines[flag].append(line)
 
     def read_records_from_logs(self, *logs):
-        for line in cat(*logs):
+        for line, line_no, log_filename in lines_from_log_files(*logs):
             self._save_line(HistorySaveFlag.ALL_LINES, line)
             d = parse(line)
             if d:
@@ -146,6 +146,8 @@ class History:
                         psbuild = "n/a"
 
                     record = Record(
+                        _line_no=line_no,
+                        _log_filename=log_filename,
                         ip=d["h"],
                         user=d["u"],
                         date=t_date,
@@ -355,9 +357,15 @@ def write_records_as_csv(
     records: List[Record],
     field_label_map: Mapping[str, str] = Record.FIELD_LABELS,
     restval="n/a",
+    extrasaction="ignore",
     out=sys.stdout,
 ) -> None:
-    writer = csv.DictWriter(out, field_label_map.keys(), restval=restval)
+    writer = csv.DictWriter(
+        out,
+        field_label_map.keys(),
+        restval=restval,
+        extrasaction=extrasaction,
+    )
     writer.writerow(field_label_map)
     writer.writerows(
         [
@@ -495,11 +503,11 @@ def determine_log_filenames(access_log, today):
     return previous_log, current_log
 
 
-def cat(*filenames):
+def lines_from_log_files(*filenames) -> Tuple[str, int, str]:
     for fn in filenames:
         with open(fn) as f:
-            for line in f:
-                yield line
+            for i, line in enumerate(f):
+                yield line, i, fn
 
 
 def pat(name, pattern):
