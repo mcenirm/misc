@@ -283,7 +283,7 @@ class Sqlite3Database(Database):
         sql = "INSERT INTO {0}({1}{2}) VALUES(?{3}) ON CONFLICT({1}) DO UPDATE SET {4}".format(
             self.table_name,
             self.pk_name,
-            [",{0}".format(_) for _ in self.column_names],
+            "".join([",{0}".format(_) for _ in self.column_names]),
             ",?" * len(self.column_names),
             ",".join(["{0}=excluded.{0}".format(_) for _ in self.column_names]),
         )
