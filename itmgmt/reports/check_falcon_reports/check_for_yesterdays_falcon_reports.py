@@ -280,7 +280,7 @@ class Sqlite3Database(Database):
         ctx.close()
 
     def upsert(self, records: List[Record]) -> None:
-        sql = "INSERT INTO {0}({1}{2}) VALUES(?{4}) ON CONFLICT({1}) DO UPDATE SET {5}".format(
+        sql = "INSERT INTO {0}({1}{2}) VALUES(?{3}) ON CONFLICT({1}) DO UPDATE SET {4}".format(
             self.table_name,
             self.pk_name,
             [",{0}".format(_) for _ in self.column_names],
@@ -292,7 +292,8 @@ class Sqlite3Database(Database):
         ctx.executemany(
             sql,
             [
-                [record[self.pk_name]] + [record[_] for _ in self.column_names]
+                [record[self.pk_name]]
+                + [record.get(_, None) for _ in self.column_names]
                 for record in records
             ],
         )
