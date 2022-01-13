@@ -186,7 +186,7 @@ class Database:
         self.table_name = "records"
         self.pk_name = "recordid"
         self.ts_name = "timestamp"
-        self.column_names = column_names
+        self.column_names = list(column_names)
 
     def _repair_records_schema(self):
         ctx = self._new_context()
