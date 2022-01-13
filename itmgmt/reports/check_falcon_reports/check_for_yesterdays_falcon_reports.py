@@ -533,7 +533,7 @@ def get_date_for_expression(date_expression: str) -> datetime.date:
 def determine_log_filenames(access_log: str, today: datetime.date) -> Tuple[str, str]:
     yesterday = today - datetime.timedelta(days=1)
     logs = [
-        "{0}.{1}".format((access_log, _.strftime("%Y_%b"))) for _ in (yesterday, today)
+        "{0}.{1}".format(access_log, _.strftime("%Y_%b")) for _ in (yesterday, today)
     ]
     if logs[0] == logs[1]:
         del logs[1]
