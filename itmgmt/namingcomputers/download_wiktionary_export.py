@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from logging import warning
 from math import ceil
 from pathlib import Path
-from types import TracebackType
-from typing import Callable, Type, Union
+from typing import Callable
 from urllib.request import urlretrieve
 
 import bs4
