@@ -1,3 +1,4 @@
+import bz2
 import enum
 import sys
 import xml.dom.pulldom
@@ -9,7 +10,7 @@ from xml.dom.minidom import Element, Node
 
 from rich import print as rprint
 
-from mediawiki_export_util import EXPORT_NS, FORMAT, MODEL, PAGE, SKIPS, TEXT, TITLE
+from mediawiki_export_constants import EXPORT_NS, FORMAT, MODEL, PAGE, TEXT, TITLE
 
 
 class NodeType(enum.Enum):
@@ -71,24 +72,13 @@ def default_title_filter(title: str) -> bool:
 
 
 def pages(xmlfile, title_filter=default_title_filter):
-    for node in page_nodes(xmlfile, title_filter):
+    for node in filter_pages_by_title(xmlfile, title_filter):
         title = get_text_property(node, EXPORT_NS, TITLE)
         model = get_text_property(node, EXPORT_NS, MODEL)
         format_ = get_text_property(node, EXPORT_NS, FORMAT)
         text = get_text_property(node, EXPORT_NS, TEXT)
-        rprint({"title": title})
-
-
-def read_page_nodes(xmlfile):
-    docstream = xml.dom.pulldom.parse(xmlfile)
-    for event, node in docstream:
-        if (
-            event == xml.dom.pulldom.START_ELEMENT
-            and node.namespaceURI == EXPORT_NS
-            and node.localName == PAGE
-        ):
-            docstream.expandNode(node)
-            yield node
+        page = Page(title, model, format_, text)
+        yield page
 
 
 def filter_pages_by_title(xmlfile, title_filter=default_title_filter):
@@ -105,17 +95,37 @@ def filter_pages_by_title(xmlfile, title_filter=default_title_filter):
                 yield node
 
 
+def opensesame(*args, **kwargs):
+    try:
+        f = bz2.open(*args, **kwargs)
+        f.peek(0)
+        return f
+    except OSError as e:
+        if e.args != ("Invalid data stream",):
+            raise
+    return open(*args, **kwargs)
+
+
 def wrangle(xmlfile, word_list):
     def title_in_word_list(title: str) -> bool:
         return title in word_list
 
-    for i, page in enumerate(pages(xmlfile, title_in_word_list)):
-        rprint(page.title)
-        if i >= 10:
-            break
+    with opensesame(xmlfile) as f:
+        i = 0
+        for page in pages(f, title_in_word_list):
+            i += 1
+            if page.model != "wikitext":
+                raise ValueError(
+                    "unexpected model {0:r} for {1:r}".format(page.model, page.title)
+                )
+            if page.format != "text/x-wiki":
+                raise ValueError(
+                    "unexpected format {0:r} for {1:r}".format(page.format, page.title)
+                )
+        print("{0} words".format(i))
 
 
 if __name__ == "__main__":
-    from wordle_list import word_list
+    from wordle_list import words
 
-    wrangle(sys.argv[1], word_list)
+    wrangle(sys.argv[1], words)
