@@ -1,35 +1,26 @@
-import os
+"""Download Wiktionary dump file"""
+
+
 import sys
 import urllib.parse
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from logging import warning
+from math import ceil
 from pathlib import Path
-from typing import Callable
+from types import TracebackType
+from typing import Callable, Type, Union
+from urllib.request import urlretrieve
 
 import bs4
 import requests
 import requests_cache
 import rich
-
-"""Download Wiktionary dump file
-"""
+from progress import Progress
+from progress.bar import FillingSquaresBar
 
 ENWIKTIONARY_DUMPS_TOP = "https://dumps.wikimedia.org/enwiktionary/"
 ENWIKTIONARY_DUMPS_OUT = Path() / "enwiktionary"
-
-
-class FindLinkException(Exception):
-    def __init__(self, *args, **kwargs) -> None:
-        self.url = kwargs.pop("url", None)
-        self.html = kwargs.pop("html", None)
-        super().__init__(*args, **kwargs)
-
-
-class MatchingLinkNotFound(FindLinkException):
-    """No dump date link was found in the listing"""
-
-
-class MultipleLinksFound(FindLinkException):
-    """Too many matching links were found in the listing"""
 
 
 @dataclass
@@ -56,7 +47,11 @@ def determine_best_download_link(links: list[Link], **kwargs) -> Link:
             scores[href] -= 100
         if href.find("-current") > -1:
             scores[href] += 10
-    best_link = sorted(links, key=lambda link: scores[link.href], reverse=True)[0]
+    best_link = sorted(
+        links,
+        key=lambda link: scores[link.href],
+        reverse=True,
+    )[0]
     return best_link
 
 
@@ -90,6 +85,38 @@ def determine_dump_date_url(
     return best_link.full_url
 
 
+class ProgressReportHook(AbstractContextManager):
+    """Use progress.Progress as urlretrieve reporthook"""
+
+    def __init__(
+        self,
+        message="Retrieving",
+        progress_class: Progress = FillingSquaresBar,
+    ) -> None:
+        self.message = message
+        self.progress_class = progress_class
+        self.progress = None
+
+    def __call__(
+        self,
+        blocks_so_far: int,
+        block_size_in_bytes: int,
+        total_size_in_bytes: int,
+    ) -> None:
+        if not self.progress:
+            progress_max = int(ceil(total_size_in_bytes / block_size_in_bytes))
+            self.progress = self.progress_class(self.message, max=progress_max)
+        self.progress.next()
+
+    def __exit__(self, __exc_type, __exc_value, __traceback) -> bool:
+        self.finish()
+        return False
+
+    def finish(self):
+        self.progress.finish()
+        self.progress = None
+
+
 def download(
     url,
     *,
@@ -100,15 +127,14 @@ def download(
     if not out_file:
         out_file = out_dir / Path(urllib.parse.urlparse(url).path).name
     out_file.parent.mkdir(parents=True, exist_ok=True)
-    resp = requests.get(url, stream=True)
-    if resp.ok:
-        with open(out_file, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=1024 * 8):
-                if chunk:
-                    f.write(chunk)
-                    f.flush()
-                    os.fsync(f.fileno())
-    resp.raise_for_status()
+    with ProgressReportHook() as hook:
+        local_filename, headers = urlretrieve(url, out_file, reporthook=hook)
+    if not out_file.samefile(local_filename):
+        warning(
+            "download moved: expected=%r, result=%r",
+            str(out_file),
+            str(local_filename),
+        )
     return out_file
 
 
@@ -128,6 +154,7 @@ def run(*, download_url: str = None, **kwargs):
 
 
 def parse_argv(argv: list[str]) -> dict:
+    """TODO actually parse argv to get settings"""
     return {}
 
 

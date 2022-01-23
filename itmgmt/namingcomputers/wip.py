@@ -1,4 +1,31 @@
-###################################################################
+"""Assorted work-in-progress"""
+
+
+import datetime
+import inspect
+import urllib.parse
+from typing import Callable, Union
+
+import bs4
+import rich
+from requests_cache import requests
+
+from download_wiktionary_export import ENWIKTIONARY_DUMPS_TOP
+
+
+class FindLinkException(Exception):
+    def __init__(self, *args, **kwargs) -> None:
+        self.url = kwargs.pop("url", None)
+        self.html = kwargs.pop("html", None)
+        super().__init__(*args, **kwargs)
+
+
+class MatchingLinkNotFound(FindLinkException):
+    """No dump date link was found in the listing"""
+
+
+class MultipleLinksFound(FindLinkException):
+    """Too many matching links were found in the listing"""
 
 
 def callable_with_extras(f: Callable, *extra_args, **extra_kwargs) -> Callable:
@@ -58,7 +85,7 @@ def find_single_link_by_rule(
                 html=listing.text,
             )
         href = matching[0]["href"]
-        return urllib.parse.urljoin(top_url, href)
+        return urllib.parse.urljoin(url, href)
 
 
 def get_dumps_date_url(
@@ -77,6 +104,14 @@ def get_dumps_date_url(
         rule,
         find_all_kwargs=find_all_kwargs,
     )
+
+
+def download():
+    """TODO"""
+
+
+def foo():
+    """TODO"""
 
 
 def runzzz(**kwargs):
