@@ -2,15 +2,23 @@ import bz2
 import enum
 import sys
 import xml.dom.pulldom
+import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass
 from functools import cache
-from logging import warning
 from typing import Union
 from xml.dom.minidom import Element, Node
 
-from rich import print as rprint
+from progress.bar import FillingSquaresBar
 
-from mediawiki_export_constants import EXPORT_NS, FORMAT, MODEL, PAGE, TEXT, TITLE
+from mediawiki_export_constants import (
+    EXPORT_NS,
+    FORMAT,
+    MEDIAWIKI,
+    MODEL,
+    PAGE,
+    TEXT,
+    TITLE,
+)
 
 
 class NodeType(enum.Enum):
@@ -106,26 +114,57 @@ def opensesame(*args, **kwargs):
     return open(*args, **kwargs)
 
 
-def wrangle(xmlfile, word_list):
+def wrangle(xmlinfile, xmloutfile, word_list):
     def title_in_word_list(title: str) -> bool:
         return title in word_list
 
-    with opensesame(xmlfile) as f:
+    bar = FillingSquaresBar(max=len(word_list))
+
+    with opensesame(xmlinfile) as inf, open(xmloutfile, "w") as outf:
         i = 0
-        for page in pages(f, title_in_word_list):
-            i += 1
-            if page.model != "wikitext":
-                raise ValueError(
-                    "unexpected model {0:r} for {1:r}".format(page.model, page.title)
+        outpage = ElementTree.Element(PAGE)
+        outtitle = ElementTree.SubElement(outpage, TITLE)
+        outmodel = ElementTree.SubElement(outpage, MODEL)
+        outformat = ElementTree.SubElement(outpage, FORMAT)
+        outtext = ElementTree.SubElement(outpage, TEXT)
+        outtree = ElementTree.ElementTree(outpage)
+        ElementTree.indent(outtree)
+        outf.write('<{0} xmlns="{1}">'.format(MEDIAWIKI, EXPORT_NS))
+        try:
+            for page in pages(inf, title_in_word_list):
+                i += 1
+                if page.model != "wikitext":
+                    raise ValueError(
+                        "unexpected model {0:r} for {1:r}".format(
+                            page.model, page.title
+                        )
+                    )
+                if page.format != "text/x-wiki":
+                    raise ValueError(
+                        "unexpected format {0:r} for {1:r}".format(
+                            page.format, page.title
+                        )
+                    )
+                outtitle.text = page.title
+                outmodel.text = page.model
+                outformat.text = page.format
+                outtext.text = page.text
+                outtree.write(
+                    outf,
+                    encoding="unicode",
+                    xml_declaration=False,
+                    default_namespace=None,
+                    method="xml",
+                    short_empty_elements=True,
                 )
-            if page.format != "text/x-wiki":
-                raise ValueError(
-                    "unexpected format {0:r} for {1:r}".format(page.format, page.title)
-                )
-        print("{0} words".format(i))
+                bar.next()
+        finally:
+            outf.write("</{0}>".format(MEDIAWIKI))
+        print()
+        print("{0} out of {1} words".format(i, len(word_list)))
 
 
 if __name__ == "__main__":
     from wordle_list import words
 
-    wrangle(sys.argv[1], words)
+    wrangle(sys.argv[1], sys.argv[2], words)
