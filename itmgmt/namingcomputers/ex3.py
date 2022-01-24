@@ -159,6 +159,7 @@ def wrangle(xmlinfile, xmloutfile, word_list):
                 )
                 bar.next()
         finally:
+            bar.finish()
             outf.write("</{0}>".format(MEDIAWIKI))
         print()
         print("{0} out of {1} words".format(i, len(word_list)))

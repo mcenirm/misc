@@ -1,15 +1,15 @@
 EXPORT_NS = "http://www.mediawiki.org/xml/export-0.10/"
 
 FORMAT = "format"
+MEDIAWIKI = "mediawiki"
 MODEL = "model"
 PAGE = "page"
 TEXT = "text"
 TITLE = "title"
 
-
 SKIPS = set(
     [
-        "mediawiki",
+        MEDIAWIKI,
         "siteinfo",
         "sitename",
         "dbname",
