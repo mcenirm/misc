@@ -89,7 +89,12 @@ def pages(xmlfile, title_filter=default_title_filter):
         yield page
 
 
-def filter_pages_by_title(xmlfile, title_filter=default_title_filter):
+def filter_pages_by_title(
+    xmlfile,
+    title_filter=default_title_filter,
+    purge_other_pages=True,
+):
+    # TODO - refactor to be more general page filter, not just title
     docstream = xml.dom.pulldom.parse(xmlfile)
     for event, node in docstream:
         if (
@@ -101,6 +106,8 @@ def filter_pages_by_title(xmlfile, title_filter=default_title_filter):
             title = get_text_property(node, EXPORT_NS, TITLE)
             if title_filter(title):
                 yield node
+            elif purge_other_pages:
+                node.parentNode.removeChild(node)
 
 
 def opensesame(*args, **kwargs):
