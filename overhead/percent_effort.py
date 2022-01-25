@@ -1,35 +1,32 @@
 import ast
-import datetime
 import math
 import re
 import string
 import sys
-from dataclasses import dataclass
+from collections.abc import KeysView, Mapping, MutableMapping
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from logging import warning
-from numbers import Number
-from typing import TextIO, Type, Union
+from typing import Optional, TextIO, Type, cast
 from urllib.parse import urlparse
 
-from icecream import ic
+from icecream import ic  # type: ignore
 from rich import inspect as rinspect
 from rich import print as rprint
 
 
 def _build_abbreviations(fmt: str, incr_days: int) -> set[str]:
-    if not getattr(_build_abbreviations, "start", None):
-        # The first day of 2001 was a Monday, but this is arbitrary.
-        _build_abbreviations.start = datetime.datetime.strptime(
-            "2001-01-01",
-            "%Y-%m-%d",
-        ).date()
     abbreviations = set()
-    delta = datetime.timedelta(days=incr_days)
-    day = _build_abbreviations.start
+    delta = timedelta(days=incr_days)
+    day = GOOD_MONDAY
     while (abbr := day.strftime(fmt).upper()) not in abbreviations:
         abbreviations.add(abbr)
         day += delta
     return abbreviations
 
+
+# The first day of 2001 was a Monday, but this is arbitrary.
+GOOD_MONDAY = datetime.strptime("2001-01-01", "%Y-%m-%d").date()
 
 WEEKDAY_ABBREVIATIONS = _build_abbreviations("%a", 1)
 MONTH_ABBREVIATIONS = _build_abbreviations("%b", 31)
@@ -48,7 +45,7 @@ class DayParser:
         if self.format_handles_year:
             self._format = __format
         else:
-            self._format = "%Y {0}".format(__format)
+            self._format = f"%Y {__format}"
 
     @property
     def format(self):
@@ -58,23 +55,23 @@ class DayParser:
     def format_handles_year(self):
         return self._format_handles_year
 
-    def parse_day(self, day: str) -> Union[datetime.date, None]:
+    def parse_day(self, day: str) -> Optional[date]:
         if self.format_handles_year:
             return self._parse_day(day)
         else:
             return self._parse_day_by_guessing_year(day)
 
-    def _parse_day(self, day: str) -> Union[datetime.date, None]:
+    def _parse_day(self, day: str) -> Optional[date]:
         try:
             return self._strpdate(day, self.format)
         except ValueError:
             return None
 
-    def _parse_day_by_guessing_year(self, day: str) -> Union[datetime.date, None]:
-        today = datetime.date.today()
+    def _parse_day_by_guessing_year(self, day: str) -> Optional[date]:
+        today = date.today()
         guesses = []
         for dy in [-1, 0, +1]:
-            year_and_day = "{0} {1}".format(today.year + dy, day)
+            year_and_day = f"{today.year + dy} {day}"
             guess = self._parse_day(year_and_day)
             if guess:
                 guesses.append(guess)
@@ -90,12 +87,12 @@ class DayParser:
             return None
 
     @staticmethod
-    def _strpdate(__date_string: str, __format: str) -> datetime.date:
-        return datetime.datetime.strptime(__date_string, __format).date()
+    def _strpdate(__date_string: str, __format: str) -> date:
+        return datetime.strptime(__date_string, __format).date()
 
     @staticmethod
     def _does_day_format_handle_year(__format: str) -> bool:
-        today = datetime.date.today()
+        today = date.today()
         today_as_string = today.strftime(__format)
         reparsed_today = DayParser._strpdate(today_as_string, __format)
         return today == reparsed_today
@@ -104,54 +101,66 @@ class DayParser:
 DAY_PARSER = DayParser("%a %b %d")
 DAY_ENTRY_PARTS_SEPARATOR = " - "
 
+DistributionAccountName = str
+DistributionConstraintSpecification = str
+EffortHours = float
+EffortPercent = float
+EffortPoints = float
+EntryKey = str
+EntrySpecification = str
+
 
 @dataclass(frozen=True)
 class DistributionConstraint:
-    distribution_account_name: str
+    distribution_account_name: DistributionAccountName
 
     @classmethod
-    def from_spec(
+    def fromspec(
         cls: Type["DistributionConstraint"],
-        spec: str,
+        spec: DistributionConstraintSpecification,
         /,
-    ) -> Union["DistributionConstraint", None]:
+    ) -> Optional["DistributionConstraint"]:
         raise NotImplementedError()
 
 
 @dataclass(frozen=True)
 class PercentEffortDistributionConstraint(DistributionConstraint):
-    min_percent: Number
-    max_percent: Number
+    min_percent: EffortPercent
+    max_percent: EffortPercent
 
 
 @dataclass(frozen=True)
 class HourDistributionConstraint(DistributionConstraint):
-    min_hours: Number
-    max_hours: Number
+    min_hours: EffortHours
+    max_hours: EffortHours
 
     @classmethod
-    def from_spec(
+    def fromspec(
         cls: Type["HourDistributionConstraint"],
-        spec: str,
+        spec: DistributionConstraintSpecification,
         /,
-    ) -> Union["HourDistributionConstraint", None]:
+    ) -> Optional["HourDistributionConstraint"]:
         before_and_hours_and_after = RE_NUMBER_OF_HOURS.split(spec, maxsplit=1)
         if len(before_and_hours_and_after) != 3:
             return None
         before, number_of_hours, after = before_and_hours_and_after
+        # TODO min vs max?
         after = after.lstrip(string.punctuation).strip()
-        o = cls(after, 0, ast.literal_eval(number_of_hours))
-        return o
+        return cls(
+            DistributionAccountName(after),
+            EffortHours(0),
+            EffortHours(ast.literal_eval(number_of_hours)),
+        )
 
 
 @dataclass(frozen=True)
 class RemainderDistributionConstraint(DistributionConstraint):
     @classmethod
-    def from_spec(
+    def fromspec(
         cls: Type["RemainderDistributionConstraint"],
-        spec: str,
+        spec: DistributionConstraintSpecification,
         /,
-    ) -> Union["RemainderDistributionConstraint", None]:
+    ) -> Optional["RemainderDistributionConstraint"]:
         words = spec.split()
         if not words:
             return None
@@ -159,56 +168,94 @@ class RemainderDistributionConstraint(DistributionConstraint):
             spec = spec.removeprefix(words[0]).strip()
             words.pop(0)
         if words:
-            name = spec
-            o = cls(name)
-            return o
+            return cls(DistributionAccountName(spec))
         else:
             return None
 
 
+@dataclass
+class Score:
+    points: EffortPoints = EffortPoints(0)
+    hours: EffortHours = EffortHours(0)
+    ignored_hours: EffortHours = EffortHours(0)
+    percent_effort: EffortPercent = EffortPercent(0)
+
+    def __iadd__(self, other: "Score") -> "Score":
+        self.points += other.points
+        self.hours += other.hours
+        self.ignored_hours += other.ignored_hours
+        return self
+
+    def __repr__(self) -> str:
+        ps = []
+        for attrname in [
+            "points",
+            "hours",
+            "ignored_hours",
+            "percent_effort",
+        ]:
+            value = getattr(self, attrname, None)
+            if value:
+                ps.append(f"{attrname}={value}")
+        return f"{self.__class__.__name__}({', '.join(ps)})"
+
+
+class Summary(dict[EntryKey, Score]):
+    ...
+
+
 @dataclass(frozen=True)
 class Entry:
-    key: str
+    key: EntryKey
 
     @classmethod
-    def from_spec(
+    def fromspec(
         cls: Type["Entry"],
-        spec: str,
+        spec: EntrySpecification,
         /,
-    ) -> Union["Entry", None]:
+    ) -> Optional["Entry"]:
         raise NotImplementedError()
+
+    def as_score(self) -> Score:
+        return Score()
+
+    def isignorable(self):
+        return self.key.startswith("z-")
 
 
 @dataclass(frozen=True)
 class PointsEntry(Entry):
-    points: Number
+    points: EffortPoints
 
     @classmethod
-    def from_spec(
+    def fromspec(
         cls: Type["PointsEntry"],
-        spec: str,
+        spec: EntrySpecification,
         /,
-    ) -> Union["PointsEntry", None]:
+    ) -> Optional["PointsEntry"]:
         try:
             key_and_points = spec.split(maxsplit=1)
             key = key_and_points[0].strip().lower()
-            points = ast.literal_eval(key_and_points[1])
-            assert isinstance(points, Number)
+            points = EffortPoints(ast.literal_eval(key_and_points[1]))
             return cls(key, points)
         except ValueError:
             return None
 
+    def as_score(self) -> Score:
+        """TODO decide if ignored points should be tracked anyway"""
+        return Score(points=0 if self.isignorable() else self.points)
+
 
 @dataclass(frozen=True)
 class HoursEntry(Entry):
-    hours: Number
+    hours: EffortHours
 
     @classmethod
-    def from_spec(
+    def fromspec(
         cls: Type["HoursEntry"],
-        spec: str,
+        spec: EntrySpecification,
         /,
-    ) -> Union["HoursEntry", None]:
+    ) -> Optional["HoursEntry"]:
         before_and_hours_and_after = RE_NUMBER_OF_HOURS.split(spec, maxsplit=1)
         if len(before_and_hours_and_after) != 3:
             return None
@@ -216,18 +263,44 @@ class HoursEntry(Entry):
         hours = ast.literal_eval(before_and_hours_and_after[1])
         return cls(key, hours)
 
+    def as_score(self) -> Score:
+        s = Score()
+        if self.isignorable():
+            s.ignored_hours = self.hours
+        else:
+            s.hours = self.hours
+        return s
 
+
+class DistributionConstraintByAccountNameDict(
+    dict[DistributionAccountName, DistributionConstraint]
+):
+    ...
+
+
+class DistributionConstraintsByEntryKeyDict(
+    dict[EntryKey, DistributionConstraintByAccountNameDict]
+):
+    ...
+
+
+@dataclass
 class Book:
-    def __init__(self) -> None:
-        self.distribution_constraints_by_entry_key = {}
-        self.entries_by_day_and_key = {}
+    spreadsheet_url: Optional[str] = None
+    distribution_constraints_by_entry_key: DistributionConstraintsByEntryKeyDict = (
+        field(default_factory=DistributionConstraintsByEntryKeyDict)
+    )
+    entries_by_day_and_key: MutableMapping[tuple[date, EntryKey], Entry] = field(
+        default_factory=dict
+    )
+    summary: Summary = field(default_factory=Summary)
 
     def constrain(
         self,
-        entry_key: str,
+        entry_key: EntryKey,
         constraints: set[DistributionConstraint],
         /,
-        context_description_in_case_of_error: str = "",
+        context_description_in_case_of_error: Optional[str] = None,
     ) -> None:
         if entry_key in self.distribution_constraints_by_entry_key:
             if context_description_in_case_of_error:
@@ -235,26 +308,62 @@ class Book:
                     " " + context_description_in_case_of_error.lstrip()
                 )
             raise ValueError(
-                "distribution constraint key {0} reused{1}".format(
-                    repr(entry_key),
-                    context_description_in_case_of_error,
-                )
+                f"distribution constraint key {entry_key!r} reused{context_description_in_case_of_error}"
             )
         else:
-            self.distribution_constraints_by_entry_key[entry_key] = constraints
+            sorted_constraints = sorted(
+                constraints, key=lambda _: _.distribution_account_name
+            )
+            constraints_by_account_name = DistributionConstraintByAccountNameDict()
+            for constraint in sorted_constraints:
+                constraints_by_account_name[
+                    constraint.distribution_account_name
+                ] = constraint
+            self.distribution_constraints_by_entry_key[
+                entry_key
+            ] = constraints_by_account_name
 
-    def add_day_entries(self, day: datetime.date, entries: list[Entry]) -> None:
+    def add_day_entries(self, day: date, entries: list[Entry]) -> None:
         for entry in entries:
             self.add_entry(day, entry)
 
-    def add_entry(self, day: datetime.date, entry: Entry) -> None:
+    def add_entry(self, day: date, entry: Entry) -> None:
         t = (day, entry.key)
         if t in self.entries_by_day_and_key:
-            raise ValueError("already saw day-key entry: {0}".format(t))
+            raise ValueError(f"already saw day-key entry: {t}")
         self.entries_by_day_and_key[t] = entry
 
+    def keys(self) -> KeysView[EntryKey]:
+        return dict.fromkeys(
+            sorted([_[1] for _ in self.entries_by_day_and_key.keys()])
+        ).keys()
 
-def parse_as_spreadsheet_url(line: str, /) -> Union[str, None]:
+    def entries_for_key(self, key) -> Mapping[date, Entry]:
+        r = {
+            day_and_key[0]: entry
+            for day_and_key, entry in self.entries_by_day_and_key.items()
+            if day_and_key[1] == key
+        }
+        return r
+
+    def summarize(self) -> Summary:
+        self.summary.clear()
+        for key in self.keys():
+            score = Score()
+            self.summary[key] = score
+            for day, entry in self.entries_for_key(key).items():
+                score += entry.as_score()
+        return self.summary
+
+    @staticmethod
+    def totals(s: Summary, /) -> Score:
+        t = Score()
+        for key, score in s.items():
+            t += score
+        return t
+
+
+def parse_as_spreadsheet_url(line: str, /) -> Optional[str]:
     if line.startswith(SPREADSHEET_URL_PREFIX):
         result = urlparse(line)
         return result.geturl()
@@ -265,7 +374,7 @@ def parse_as_spreadsheet_url(line: str, /) -> Union[str, None]:
 def parse_as_entry_key_and_distribution_constraint_set(
     line: str,
     /,
-) -> Union[tuple[str, set[DistributionConstraint]], None]:
+) -> Optional[tuple[str, set[DistributionConstraint]]]:
     key_and_specs = line.split(":", maxsplit=1)
     if len(key_and_specs) == 1:
         return None
@@ -275,8 +384,8 @@ def parse_as_entry_key_and_distribution_constraint_set(
         constraints = set()
         for spec in spec_list:
             for cls in [HourDistributionConstraint, RemainderDistributionConstraint]:
-                from_spec = getattr(cls, "from_spec")
-                constraint = from_spec(spec)
+                fromspec = getattr(cls, "fromspec")
+                constraint = fromspec(spec)
                 if constraint:
                     constraints.add(constraint)
                     break
@@ -286,7 +395,7 @@ def parse_as_entry_key_and_distribution_constraint_set(
 def parse_as_day_and_entry_list(
     line: str,
     /,
-) -> tuple[datetime.date, list[Entry]]:
+) -> Optional[tuple[date, list[Entry]]]:
     day_and_entry_list = list(line.split(DAY_ENTRY_PARTS_SEPARATOR))
     if len(day_and_entry_list) < 2:
         return None
@@ -296,8 +405,8 @@ def parse_as_day_and_entry_list(
     entry_list = []
     for entry_spec in day_and_entry_list[1:]:
         for cls in [HoursEntry, PointsEntry]:
-            from_spec = getattr(cls, "from_spec")
-            entry = from_spec(entry_spec)
+            fromspec = getattr(cls, "fromspec")
+            entry = fromspec(entry_spec)
             if entry:
                 entry_list.append(entry)
                 break
@@ -309,26 +418,84 @@ def parse_as_day_and_entry_list(
 
 def load(infile: TextIO, book: Book) -> None:
     for line_num, line in enumerate([""] + [str(_).strip() for _ in infile]):
-        if not line:
+        if not line or line.upper() in WEEKDAY_ABBREVIATIONS:
             continue
-        elif url := parse_as_spreadsheet_url(line):
-            warning("see spreadsheet at %s", url)
+
+        if url := parse_as_spreadsheet_url(line):
+            book.spreadsheet_url = url
         elif key_and_set := parse_as_entry_key_and_distribution_constraint_set(line):
             key, dcs = key_and_set
-            book.constrain(key, dcs, "at line {0}".format(line_num))
+            book.constrain(key, dcs, f"at line {line_num}")
         elif day_and_entries := parse_as_day_and_entry_list(line):
             day, entries = day_and_entries
             book.add_day_entries(day, entries)
         else:
-            unabsorbed = line
-            ic(unabsorbed)
+            warning("unrecognized line: %r", line)
 
 
 def run(stdin, /) -> None:
     book = Book()
     load(stdin, book)
-    ic(book.distribution_constraints_by_entry_key)
-    ic(book.entries_by_day_and_key)
+    constraints_by_key = book.distribution_constraints_by_entry_key
+    book_summary = book.summarize()
+    book_totals = Book.totals(book_summary)
+    ic(book_totals)
+    effortable_hours = MAX_HOURS - book_totals.ignored_hours
+    ic(effortable_hours)
+    remaining_hours = effortable_hours - book_totals.hours
+    ic(remaining_hours)
+    hours_per_point = remaining_hours / book_totals.points
+    ic(hours_per_point)
+    keywidth = max(len(_) for _ in book_summary.keys())
+    msgfmt = f"{{:5.1f}} {{:5.1f}} {{:7.1%}} {{:7.1%}} {{:{keywidth}}} {{}}"
+    total_percent_effort = 0
+    total_adjusted_percent_effort = 0
+    total_to_be_allocated_hours = EffortHours(0)
+    for key, score in book_summary.items():
+        account_name = key.upper()
+        hours_equivalent = hours_per_point * score.points
+        to_be_allocated_hours = EffortHours(0)
+        percent_effort = score.points / book_totals.points
+        if key in constraints_by_key:
+            constraints = constraints_by_key[key]
+            max_hours = sum(
+                [
+                    cast(HourDistributionConstraint, _).max_hours
+                    for _ in constraints.values()
+                    if isinstance(_, HourDistributionConstraint)
+                ]
+            )
+            if max_hours > 0 and hours_equivalent > max_hours:
+                to_be_allocated_hours = hours_equivalent - max_hours
+                hours_equivalent = max_hours
+            # for a, c in constraints.items():
+            #     if isinstance(c, HourDistributionConstraint):
+            #         hdc = cast(HourDistributionConstraint, c)
+            #         max_hours += hdc.max_hours
+            #     ic(a, c)
+        adjusted_percent_effort = hours_equivalent / effortable_hours
+        total_percent_effort += percent_effort
+        total_to_be_allocated_hours += to_be_allocated_hours
+        total_adjusted_percent_effort += adjusted_percent_effort
+        msg = msgfmt.format(
+            hours_equivalent,
+            to_be_allocated_hours,
+            adjusted_percent_effort,
+            percent_effort,
+            key,
+            score,
+        )
+        print(msg)
+    print(
+        msgfmt.format(
+            effortable_hours,
+            total_to_be_allocated_hours,
+            total_adjusted_percent_effort,
+            total_percent_effort,
+            "",
+            "",
+        )
+    )
 
 
 def main() -> None:
