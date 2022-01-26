@@ -40,3 +40,6 @@ EXPECTING_TEXT_TAGS = set(
         TEXT,
     ]
 )
+
+WIKITEXT_MODEL = "wikitext"
+WIKITEXT_FORMAT = "text/x-wiki"
