@@ -7,8 +7,8 @@ from xml.dom.minidom import Node
 import rich
 from progress.bar import FillingSquaresBar
 
+from mediawiki_export_filtering import copy_only_matching_pages
 from mediawiki_export_reading import Page, opensesame
-from wikimedia_export_filtering import copy_only_matching_pages
 
 
 class NodeType(enum.Enum):
