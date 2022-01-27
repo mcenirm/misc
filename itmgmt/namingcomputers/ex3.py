@@ -1,22 +1,14 @@
 import enum
 import sys
 import xml.dom.pulldom
-import xml.etree.ElementTree as ElementTree
 from functools import cache
 from xml.dom.minidom import Node
 
+import rich
 from progress.bar import FillingSquaresBar
 
-from mediawiki_export_constants import (
-    EXPORT_NS,
-    FORMAT,
-    MEDIAWIKI,
-    MODEL,
-    PAGE,
-    TEXT,
-    TITLE,
-)
-from mediawiki_export_reading import opensesame, pages
+from mediawiki_export_reading import Page, opensesame
+from wikimedia_export_filtering import copy_only_matching_pages
 
 
 class NodeType(enum.Enum):
@@ -49,54 +41,24 @@ def stack(node: Node) -> list[str]:
 
 
 def wrangle(xmlinfile, xmloutfile, word_list):
-    def title_in_word_list(title: str) -> bool:
-        return title in word_list
-
     bar = FillingSquaresBar(max=len(word_list))
 
+    def show_progress_and_true_if_title_in_word_list(page: Page) -> bool:
+        b = page.title in word_list
+        if b:
+            bar.next()
+        return b
+
     with opensesame(xmlinfile) as inf, open(xmloutfile, "w") as outf:
-        i = 0
-        outpage = ElementTree.Element(PAGE)
-        outtitle = ElementTree.SubElement(outpage, TITLE)
-        outmodel = ElementTree.SubElement(outpage, MODEL)
-        outformat = ElementTree.SubElement(outpage, FORMAT)
-        outtext = ElementTree.SubElement(outpage, TEXT)
-        outtree = ElementTree.ElementTree(outpage)
-        ElementTree.indent(outtree)
-        outf.write('<{0} xmlns="{1}">'.format(MEDIAWIKI, EXPORT_NS))
-        try:
-            for page in pages(inf, title_in_word_list):
-                i += 1
-                if page.model != "wikitext":
-                    raise ValueError(
-                        "unexpected model {0:r} for {1:r}".format(
-                            page.model, page.title
-                        )
-                    )
-                if page.format != "text/x-wiki":
-                    raise ValueError(
-                        "unexpected format {0:r} for {1:r}".format(
-                            page.format, page.title
-                        )
-                    )
-                outtitle.text = page.title
-                outmodel.text = page.model
-                outformat.text = page.format
-                outtext.text = page.text
-                outtree.write(
-                    outf,
-                    encoding="unicode",
-                    xml_declaration=False,
-                    default_namespace=None,
-                    method="xml",
-                    short_empty_elements=True,
-                )
-                bar.next()
-        finally:
-            bar.finish()
-            outf.write("</{0}>".format(MEDIAWIKI))
-        print()
-        print("{0} out of {1} words".format(i, len(word_list)))
+        stats = copy_only_matching_pages(
+            inf,
+            outf,
+            show_progress_and_true_if_title_in_word_list,
+        )
+    bar.finish()
+    print()
+    rich.print(len(word_list))
+    rich.print(stats)
 
 
 if __name__ == "__main__":
