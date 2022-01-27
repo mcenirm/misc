@@ -1,14 +1,15 @@
 """Download Wiktionary dump file"""
 
-
+import logging
+import string
 import sys
 import urllib.parse
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from logging import warning
+from http.client import HTTPConnection
 from math import ceil
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from urllib.request import urlretrieve
 
 import bs4
@@ -112,7 +113,8 @@ class ProgressReportHook(AbstractContextManager):
         return False
 
     def finish(self):
-        self.progress.finish()
+        if self.progress:
+            self.progress.finish()
         self.progress = None
 
 
@@ -123,13 +125,18 @@ def download(
     out_dir: Path = ENWIKTIONARY_DUMPS_OUT,
     **kwargs,
 ) -> Path:
+    for k in ("url", "out_file", "out_dir"):
+        v = locals().get(k, None)
+        if v:
+            logging.debug("download - %s: %r", k, v)
     if not out_file:
         out_file = out_dir / Path(urllib.parse.urlparse(url).path).name
+        logging.debug("download - out_file: %r", out_file)
     out_file.parent.mkdir(parents=True, exist_ok=True)
     with ProgressReportHook() as hook:
         local_filename, headers = urlretrieve(url, out_file, reporthook=hook)
     if not out_file.samefile(local_filename):
-        warning(
+        logging.warning(
             "download moved: expected=%r, result=%r",
             str(out_file),
             str(local_filename),
@@ -152,13 +159,42 @@ def run(*, download_url: str = None, **kwargs):
     print(out_file)
 
 
-def parse_argv(argv: list[str]) -> dict:
-    """TODO actually parse argv to get settings"""
-    return {}
+def parse_argv(argv: list[str]) -> dict[str, Any]:
+    valuemap = dict(false=False, no=False, true=True, yes=True)
+    it = iter(argv[1:])
+    kwargs = {}
+    args = []
+    for arg in it:
+        if arg == "--":
+            break
+        if arg.startswith("-"):
+            arg = arg.lstrip(string.punctuation)
+            if "=" in arg:
+                key, value = arg.split("=", maxsplit=1)
+            elif arg.startswith("no-"):
+                arg = arg[3:]
+                value = "no"
+            else:
+                value = "yes"
+            arg = arg.lower()
+            value = valuemap.get(value.lower(), None) or value
+            kwargs[arg] = value
+        else:
+            args.append(arg)
+    args.extend(it)
+    if args:
+        kwargs["_args"] = args
+    return kwargs
 
 
 def main() -> None:
     kwargs = parse_argv(sys.argv)
+    debug = kwargs.pop("debug", False)
+    if debug:
+        logging.basicConfig()
+        logging.getLogger().setLevel(logging.DEBUG)
+        HTTPConnection.debuglevel = 1
+
     run(**kwargs)
     sys.exit(0)
 
