@@ -49,13 +49,12 @@ def wrangle(xmlinfile, xmloutfile, word_list):
             bar.next()
         return b
 
-    with opensesame(xmlinfile) as inf, open(xmloutfile, "w") as outf:
+    with bar, opensesame(xmlinfile) as inf, open(xmloutfile, "w") as outf:
         stats = copy_only_matching_pages(
             inf,
             outf,
             show_progress_and_true_if_title_in_word_list,
         )
-    bar.finish()
     print()
     rich.print(len(word_list))
     rich.print(stats)
