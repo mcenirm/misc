@@ -13,7 +13,9 @@ if __name__ == "__main__":
         prgrss.next()
         return page.text and "[[Category:en:Parts of speech]]" in page.text
 
-    with prgrss, opensesame(sys.argv[1]) as inf, open(sys.argv[2], "w") as outf:
+    inf = opensesame(sys.argv[1], "r")
+    outf = open(sys.argv[2], "w", encoding="utf-8")
+    with prgrss, inf, outf:
         stats = copy_only_matching_pages(
             inf,
             outf,
