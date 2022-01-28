@@ -56,8 +56,6 @@ def pages(
     xmlfile,
     /,
     matcher=always_true,
-    *,
-    purge_discarded_nodes=True,
 ) -> Iterator[Page]:
     for page_elem in page_elements(xmlfile):
         title = get_text_property(page_elem, EXPORT_NS, TITLE)
@@ -65,12 +63,28 @@ def pages(
         format_ = get_text_property(page_elem, EXPORT_NS, FORMAT)
         text = get_text_property(page_elem, EXPORT_NS, TEXT)
         page = Page(title, model, format_, text)
+        page_elem.unlink()
         if matcher(page):
             yield page
-        elif purge_discarded_nodes:
-            if page_elem.parentNode:
-                page_elem.parentNode.removeChild(page_elem)
-            page_elem.unlink()
+
+
+def pages_as_dicts(
+    xmlfile,
+) -> Iterator[dict[str, str]]:
+    for page_elem in page_elements(xmlfile):
+        page = {}
+        children = cast(list[Node], page_elem.childNodes)
+        for child in children:
+            if child.nodeType == child.ELEMENT_NODE:
+                value = get_text_property(
+                    page_elem,
+                    child.namespaceURI,
+                    child.localName,
+                )
+                if value:
+                    page[child.localName] = value
+        page_elem.unlink()
+        yield page
 
 
 def page_elements(xmlfile) -> Iterator[Element]:
