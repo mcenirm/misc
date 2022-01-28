@@ -2,12 +2,12 @@ import sys
 from typing import cast
 from xml.dom.minidom import Element, Node
 
-import avro.errors
-import avro.schema
+import avro.errors  # type: ignore
+import avro.schema  # type: ignore
 import rich
-from avro.datafile import DataFileReader, DataFileWriter
-from avro.io import DatumReader, DatumWriter
-from progress.counter import Counter
+from avro.datafile import DataFileReader, DataFileWriter  # type: ignore
+from avro.io import DatumReader, DatumWriter  # type: ignore
+from progress.counter import Counter  # type: ignore
 
 from mediawiki_export_reading import opensesame, page_elements, pages, pages_as_dicts
 

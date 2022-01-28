@@ -1,19 +1,21 @@
 import bz2
-import xml.dom.pulldom
 from dataclasses import dataclass
 from functools import cache
-from typing import Iterator, Optional, Union, cast
-from xml.dom.minidom import Element, Node
+from typing import Any, Callable, Iterator, Optional, TextIO, Union
+
+import lxml.etree as etree  # type: ignore
 
 from mediawiki_export_constants import EXPORT_NS, FORMAT, MODEL, PAGE, TEXT, TITLE
+
+QPAGE = etree.QName(EXPORT_NS, PAGE)
 
 
 @dataclass
 class Page:
-    title: str
-    model: str
-    format: str
-    text: str
+    title: Optional[str]
+    model: Optional[str]
+    format: Optional[str]
+    text: Optional[str]
 
 
 def opensesame(*args, **kwargs):
@@ -29,98 +31,61 @@ def opensesame(*args, **kwargs):
 
 @cache
 def get_text_property(
-    element: Element,
+    el: etree.Element,
     property_uri: str,
     property_local_name: str,
 ) -> Optional[str]:
-    node_list = element.getElementsByTagNameNS(property_uri, property_local_name)
-    if not node_list:
+    q = etree.QName(property_uri, property_local_name)
+    for child in el:
+        if child.tag == q:
+            return get_element_as_text(child)
+    return None
+
+
+def get_element_as_text(el: etree.Element) -> Optional[str]:
+    if len(el):
         return None
-    property_element = node_list.item(0)
-    if not property_element:
-        return None
-    text_node = property_element.firstChild
-    if not text_node:
-        return None
-    if text_node.nodeType != Node.TEXT_NODE:
-        return None
-    text_node.normalize()
-    return text_node.wholeText
-
-
-TEXTISH_NODE_TYPES = set(
-    (
-        Element.CDATA_SECTION_NODE,
-        Element.TEXT_NODE,
-    )
-)
-
-
-def get_element_as_text(el: Element) -> Optional[str]:
-    if not el.childNodes:
-        return None
-    s = ""
-    for child in el.childNodes:
-        if child.nodeType not in TEXTISH_NODE_TYPES:
-            return None
-        s += child.data
-    return s
-
-
-def always_true(*args):
-    return True
+    return el.text or None
 
 
 def pages(
     xmlfile,
     /,
-    matcher=always_true,
+    matcher: Callable[[Page], bool] = lambda page: True,
 ) -> Iterator[Page]:
-    for page_elem in page_elements(xmlfile):
-        title = get_text_property(page_elem, EXPORT_NS, TITLE)
-        model = get_text_property(page_elem, EXPORT_NS, MODEL)
-        format_ = get_text_property(page_elem, EXPORT_NS, FORMAT)
-        text = get_text_property(page_elem, EXPORT_NS, TEXT)
+    for page_el in page_elements(xmlfile):
+        title = get_text_property(page_el, EXPORT_NS, TITLE)
+        model = get_text_property(page_el, EXPORT_NS, MODEL)
+        format_ = get_text_property(page_el, EXPORT_NS, FORMAT)
+        text = get_text_property(page_el, EXPORT_NS, TEXT)
         page = Page(title, model, format_, text)
-        page_elem.unlink()
         if matcher(page):
             yield page
 
 
-TextPropertiesDict = dict[str, Union[str, "TextPropertiesDict"]]
+TextPropertiesDict = dict[str, Any]
 
 
-def get_text_properties_as_dicts(el: Element) -> Optional[TextPropertiesDict]:
+def get_text_properties_as_dicts(el: etree.Element) -> Optional[TextPropertiesDict]:
     d = {}
-    children = cast(list[Node], el.childNodes)
-    for child in children:
-        if child.nodeType == child.ELEMENT_NODE:
-            value = get_element_as_text(child)
-            if value is None:
-                value = get_text_properties_as_dicts(child)
-            if value is not None:
-                d[child.localName] = value
+    for child in el:
+        q = etree.QName(child)
+        if len(child):
+            value = get_text_properties_as_dicts(child)
+        else:
+            value = child.text
+        if value:
+            d[q.localname] = value
     return d or None
 
 
-def pages_as_dicts(
-    xmlfile,
-) -> Iterator[dict[str, str]]:
-    for page_elem in page_elements(xmlfile):
-        page = get_text_properties_as_dicts(page_elem)
-        page_elem.unlink()
-        yield page
+def pages_as_dicts(xmlfile) -> Iterator[Optional[TextPropertiesDict]]:
+    for page_el in page_elements(xmlfile):
+        page_dict = get_text_properties_as_dicts(page_el)
+        yield page_dict
 
 
-def page_elements(xmlfile) -> Iterator[Element]:
-    docstream = xml.dom.pulldom.parse(xmlfile)
-    for event, node in docstream:
-        node = cast(Node, node)
-        if (
-            event == xml.dom.pulldom.START_ELEMENT
-            and node.namespaceURI == EXPORT_NS
-            and node.localName == PAGE
-        ):
-            page_element = cast(Element, node)
-            docstream.expandNode(page_element)
-            yield page_element
+def page_elements(xmlfile: TextIO) -> Iterator[etree.Element]:
+    for _, page_el in etree.iterparse(xmlfile, tag=QPAGE):
+        yield page_el
+        page_el.clear(keep_tail=True)

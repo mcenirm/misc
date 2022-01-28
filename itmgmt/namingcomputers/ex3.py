@@ -5,7 +5,7 @@ from functools import cache
 from xml.dom.minidom import Node
 
 import rich
-from progress.bar import FillingSquaresBar
+from progress.bar import FillingSquaresBar  # type: ignore
 
 from mediawiki_export_filtering import copy_only_matching_pages
 from mediawiki_export_reading import Page, opensesame
@@ -37,7 +37,7 @@ EVENTS_TO_HIDE = set(
 
 @cache
 def stack(node: Node) -> list[str]:
-    return (stack(node.parentNode) + [node]) if node else []
+    return (stack(node.parentNode) + [node.localName or "?"]) if node else []
 
 
 def wrangle(xmlinfile, xmloutfile, word_list):

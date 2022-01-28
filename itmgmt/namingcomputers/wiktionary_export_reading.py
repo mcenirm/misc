@@ -1,6 +1,6 @@
 from typing import Iterator
 
-import wikitextparser as wtp
+import wikitextparser as wtp  # type: ignore
 
 from mediawiki_export_constants import WIKITEXT_FORMAT, WIKITEXT_MODEL
 from mediawiki_export_reading import Page
