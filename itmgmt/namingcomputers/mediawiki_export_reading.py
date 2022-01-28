@@ -3,11 +3,24 @@ from dataclasses import dataclass
 from functools import cache
 from typing import Any, Callable, Iterator, Optional, TextIO, Union
 
-import lxml.etree as etree  # type: ignore
+from lxml import etree  # type: ignore
 
-from mediawiki_export_constants import EXPORT_NS, FORMAT, MODEL, PAGE, TEXT, TITLE
+from mediawiki_export_constants import (
+    EXPORT_NS,
+    FORMAT,
+    MEDIAWIKI,
+    MODEL,
+    PAGE,
+    TEXT,
+    TITLE,
+)
 
+QFORMAT = etree.QName(EXPORT_NS, FORMAT)
+QMEDIAWIKI = etree.QName(EXPORT_NS, MEDIAWIKI)
+QMODEL = etree.QName(EXPORT_NS, MODEL)
 QPAGE = etree.QName(EXPORT_NS, PAGE)
+QTEXT = etree.QName(EXPORT_NS, TEXT)
+QTITLE = etree.QName(EXPORT_NS, TITLE)
 
 
 @dataclass
@@ -16,6 +29,22 @@ class Page:
     model: Optional[str]
     format: Optional[str]
     text: Optional[str]
+
+    def to_lxml_etree_element(self) -> etree.Element:
+        page = etree.Element(QPAGE)
+        title = etree.Element(QTITLE)
+        title.text = self.title
+        page.append(title)
+        model = etree.Element(QMODEL)
+        model.text = self.model
+        page.append(model)
+        format = etree.Element(QFORMAT)
+        format.text = self.format
+        page.append(format)
+        text = etree.Element(QTEXT)
+        text.text = self.text
+        page.append(text)
+        return page
 
 
 def opensesame(*args, **kwargs):

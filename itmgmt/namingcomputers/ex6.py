@@ -2,8 +2,8 @@ import sys
 from collections import defaultdict
 from typing import Any
 
-import lxml.etree as etree  # type:ignore
 import rich
+from lxml import etree  # type:ignore
 from progress.counter import Counter  # type:ignore
 
 from mediawiki_export_constants import EXPORT_NS, NS, TITLE
