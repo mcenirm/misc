@@ -1,0 +1,135 @@
+{
+    "type": "record",
+    "name": "Page",
+    "fields": [
+        {
+            "name": "title",
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        {
+            "name": "ns",
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        {
+            "name": "id",
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        {
+            "name": "revision",
+            "type": [
+                "null",
+                {
+                    "type": "record",
+                    "name": "Revision",
+                    "fields": [
+                        {
+                            "name": "comment",
+                            "type": [
+                                "null",
+                                "string"
+                            ]
+                        },
+                        {
+                            "name": "contributor",
+                            "type": [
+                                "null",
+                                {
+                                    "type": "record",
+                                    "name": "Contributor",
+                                    "fields": [
+                                        {
+                                            "name": "username",
+                                            "type": [
+                                                "null",
+                                                "string"
+                                            ]
+                                        },
+                                        {
+                                            "name": "ip",
+                                            "type": [
+                                                "null",
+                                                "string"
+                                            ]
+                                        },
+                                        {
+                                            "name": "id",
+                                            "type": [
+                                                "null",
+                                                "string"
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "name": "format",
+                            "type": [
+                                "null",
+                                "string"
+                            ]
+                        },
+                        {
+                            "name": "id",
+                            "type": [
+                                "null",
+                                "string"
+                            ]
+                        },
+                        {
+                            "name": "minor",
+                            "type": [
+                                "null",
+                                "string"
+                            ]
+                        },
+                        {
+                            "name": "model",
+                            "type": [
+                                "null",
+                                "string"
+                            ]
+                        },
+                        {
+                            "name": "parentid",
+                            "type": [
+                                "null",
+                                "string"
+                            ]
+                        },
+                        {
+                            "name": "sha1",
+                            "type": [
+                                "null",
+                                "string"
+                            ]
+                        },
+                        {
+                            "name": "text",
+                            "type": [
+                                "null",
+                                "string"
+                            ]
+                        },
+                        {
+                            "name": "timestamp",
+                            "type": [
+                                "null",
+                                "string"
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
