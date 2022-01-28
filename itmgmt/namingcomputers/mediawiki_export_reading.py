@@ -2,7 +2,7 @@ import bz2
 import xml.dom.pulldom
 from dataclasses import dataclass
 from functools import cache
-from typing import Iterator, Optional, cast
+from typing import Iterator, Optional, Union, cast
 from xml.dom.minidom import Element, Node
 
 from mediawiki_export_constants import EXPORT_NS, FORMAT, MODEL, PAGE, TEXT, TITLE
@@ -48,6 +48,25 @@ def get_text_property(
     return text_node.wholeText
 
 
+TEXTISH_NODE_TYPES = set(
+    (
+        Element.CDATA_SECTION_NODE,
+        Element.TEXT_NODE,
+    )
+)
+
+
+def get_element_as_text(el: Element) -> Optional[str]:
+    if not el.childNodes:
+        return None
+    s = ""
+    for child in el.childNodes:
+        if child.nodeType not in TEXTISH_NODE_TYPES:
+            return None
+        s += child.data
+    return s
+
+
 def always_true(*args):
     return True
 
@@ -68,21 +87,26 @@ def pages(
             yield page
 
 
+TextPropertiesDict = dict[str, Union[str, "TextPropertiesDict"]]
+
+
+def get_text_properties_as_dicts(el: Element) -> TextPropertiesDict:
+    d = {}
+    children = cast(list[Node], el.childNodes)
+    for child in children:
+        if child.nodeType == child.ELEMENT_NODE:
+            value = get_element_as_text(child)
+            d[child.localName] = (
+                value if value is not None else get_text_properties_as_dicts(child)
+            )
+    return d
+
+
 def pages_as_dicts(
     xmlfile,
 ) -> Iterator[dict[str, str]]:
     for page_elem in page_elements(xmlfile):
-        page = {}
-        children = cast(list[Node], page_elem.childNodes)
-        for child in children:
-            if child.nodeType == child.ELEMENT_NODE:
-                value = get_text_property(
-                    page_elem,
-                    child.namespaceURI,
-                    child.localName,
-                )
-                if value:
-                    page[child.localName] = value
+        page = get_text_properties_as_dicts(page_elem)
         page_elem.unlink()
         yield page
 
