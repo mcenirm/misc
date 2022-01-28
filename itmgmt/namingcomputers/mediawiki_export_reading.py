@@ -90,16 +90,17 @@ def pages(
 TextPropertiesDict = dict[str, Union[str, "TextPropertiesDict"]]
 
 
-def get_text_properties_as_dicts(el: Element) -> TextPropertiesDict:
+def get_text_properties_as_dicts(el: Element) -> Optional[TextPropertiesDict]:
     d = {}
     children = cast(list[Node], el.childNodes)
     for child in children:
         if child.nodeType == child.ELEMENT_NODE:
             value = get_element_as_text(child)
-            d[child.localName] = (
-                value if value is not None else get_text_properties_as_dicts(child)
-            )
-    return d
+            if value is None:
+                value = get_text_properties_as_dicts(child)
+            if value is not None:
+                d[child.localName] = value
+    return d or None
 
 
 def pages_as_dicts(
