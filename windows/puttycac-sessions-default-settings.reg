@@ -25,3 +25,4 @@ Windows Registry Editor Version 5.00
 "TermHeight"=dword:00000028
 "TermWidth"=dword:00000064
 "UserNameFromEnvironment"=dword:00000001
+"UTF8linedraw"=dword:00000000
