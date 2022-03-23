@@ -69,7 +69,7 @@ def make_argument_parser(prog=None):
     argument_parser = ArgumentParser(prog=prog)
     argument_parser.add_argument("machines_json", help="machines definition file")
     argument_parser.add_argument("--outputs-dir", default="outputs")
-    argument_parser.add_argument("--template-name", default="experiment2")
+    argument_parser.add_argument("--template-name", default="experiment3")
     return argument_parser
 
 
