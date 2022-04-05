@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from icecream import ic  # type: ignore
 from rich import inspect as rinspect
 from rich import print as rprint
+from rich.table import Table
 
 
 def _build_abbreviations(fmt: str, incr_days: int) -> set[str]:
@@ -354,6 +355,12 @@ class Book:
             for day, entry in self.entries_for_key(key).items():
                 score += entry.as_score()
         return self.summary
+
+    def auxiliary_table(self) -> Table:
+        # self.entries_by_day_and_key.keys
+        headers = []
+        t = Table(*headers)
+        return t
 
     @staticmethod
     def totals(s: Summary, /) -> Score:
