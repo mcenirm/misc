@@ -39,6 +39,8 @@ RE_NUMBER_OF_HOURS = re.compile(
     re.IGNORECASE,
 )
 
+AUX_TABLE_DATE_FORMAT = "%A, %b %d, %Y"  # Tuesday, Apr 05, 2022
+
 
 class DayParser:
     def __init__(self, __format: str) -> None:
@@ -357,8 +359,13 @@ class Book:
         return self.summary
 
     def auxiliary_table(self) -> Table:
-        # self.entries_by_day_and_key.keys
-        headers = []
+        all_dates = sorted({_[0] for _ in self.entries_by_day_and_key.keys()})
+        first_date = all_dates[0]
+        last_date = all_dates[-1]
+        num_days = (last_date - first_date + timedelta(days=1)).days
+        all_dates = [first_date + timedelta(days=i) for i in range(num_days)]
+        stuck_columns = ["Earning Code", "Shift", "Total Hours", "Total Units"]
+        headers = stuck_columns + [_.strftime(AUX_TABLE_DATE_FORMAT) for _ in all_dates]
         t = Table(*headers)
         return t
 
@@ -503,6 +510,7 @@ def run(stdin, /) -> None:
             "",
         )
     )
+    rprint(book.auxiliary_table())
 
 
 def main() -> None:
