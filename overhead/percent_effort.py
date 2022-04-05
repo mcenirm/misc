@@ -222,7 +222,7 @@ class Entry:
     def as_score(self) -> Score:
         return Score()
 
-    def isignorable(self):
+    def is_auxiliary(self):
         return self.key.startswith("z-")
 
 
@@ -246,7 +246,7 @@ class PointsEntry(Entry):
 
     def as_score(self) -> Score:
         """TODO decide if auxiliary points should be tracked anyway"""
-        return Score(points=0 if self.isignorable() else self.points)
+        return Score(points=0 if self.is_auxiliary() else self.points)
 
 
 @dataclass(frozen=True)
@@ -268,7 +268,7 @@ class HoursEntry(Entry):
 
     def as_score(self) -> Score:
         s = Score()
-        if self.isignorable():
+        if self.is_auxiliary():
             s.auxiliary_hours = self.hours
         else:
             s.hours = self.hours
