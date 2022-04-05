@@ -177,13 +177,13 @@ class RemainderDistributionConstraint(DistributionConstraint):
 class Score:
     points: EffortPoints = EffortPoints(0)
     hours: EffortHours = EffortHours(0)
-    ignored_hours: EffortHours = EffortHours(0)
+    auxiliary_hours: EffortHours = EffortHours(0)
     percent_effort: EffortPercent = EffortPercent(0)
 
     def __iadd__(self, other: "Score") -> "Score":
         self.points += other.points
         self.hours += other.hours
-        self.ignored_hours += other.ignored_hours
+        self.auxiliary_hours += other.auxiliary_hours
         return self
 
     def __repr__(self) -> str:
@@ -191,7 +191,7 @@ class Score:
         for attrname in [
             "points",
             "hours",
-            "ignored_hours",
+            "auxiliary_hours",
             "percent_effort",
         ]:
             value = getattr(self, attrname, None)
@@ -242,7 +242,7 @@ class PointsEntry(Entry):
             return None
 
     def as_score(self) -> Score:
-        """TODO decide if ignored points should be tracked anyway"""
+        """TODO decide if auxiliary points should be tracked anyway"""
         return Score(points=0 if self.isignorable() else self.points)
 
 
@@ -266,7 +266,7 @@ class HoursEntry(Entry):
     def as_score(self) -> Score:
         s = Score()
         if self.isignorable():
-            s.ignored_hours = self.hours
+            s.auxiliary_hours = self.hours
         else:
             s.hours = self.hours
         return s
@@ -440,7 +440,7 @@ def run(stdin, /) -> None:
     book_summary = book.summarize()
     book_totals = Book.totals(book_summary)
     ic(book_totals)
-    effortable_hours = MAX_HOURS - book_totals.ignored_hours
+    effortable_hours = MAX_HOURS - book_totals.auxiliary_hours
     ic(effortable_hours)
     remaining_hours = effortable_hours - book_totals.hours
     ic(remaining_hours)
