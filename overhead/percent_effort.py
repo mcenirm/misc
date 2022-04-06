@@ -388,14 +388,39 @@ class Book:
         return self.summary
 
     def auxiliary_table(self) -> Table:
-        all_dates = sorted({_[0] for _ in self.entries_by_day_and_key.keys()})
+        all_dates = sorted({d for d, _ in self.entries_by_day_and_key.keys()})
         first_date = all_dates[0]
         last_date = all_dates[-1]
         num_days = (last_date - first_date + timedelta(days=1)).days
         all_dates = [first_date + timedelta(days=i) for i in range(num_days)]
+
+        all_auxillary_keys = sorted(
+            {k for (_, k), e in self.entries_by_day_and_key.items() if e.is_auxiliary()}
+        )
+
         stuck_columns = ["Earning Code", "Shift", "Total Hours", "Total Units"]
         headers = stuck_columns + [_.strftime(AUX_TABLE_DATE_FORMAT) for _ in all_dates]
         t = Table(*headers)
+
+        for auxillary_key in all_auxillary_keys:
+            x = []
+            total_hours = 0
+            for d in all_dates:
+                he = self.entries_by_day_and_key.get((d, auxillary_key), None)
+                if he and isinstance(he, HoursEntry):
+                    total_hours += he.hours
+                    v = str(he.hours)
+                else:
+                    v = ""
+                x.append(v)
+            t.add_row(
+                auxillary_key.title(),
+                "",
+                str(total_hours) if total_hours else "",
+                "",
+                *x,
+            )
+
         return t
 
     @staticmethod
