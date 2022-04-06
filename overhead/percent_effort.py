@@ -1,4 +1,5 @@
 import ast
+from functools import total_ordering
 import math
 import re
 import string
@@ -40,6 +41,7 @@ RE_NUMBER_OF_HOURS = re.compile(
 )
 
 AUX_TABLE_DATE_FORMAT = "%A, %b %d, %Y"  # Tuesday, Apr 05, 2022
+AUX_KEY_PREFIX = "z-"
 
 
 class DayParser:
@@ -109,8 +111,28 @@ DistributionConstraintSpecification = str
 EffortHours = float
 EffortPercent = float
 EffortPoints = float
-EntryKey = str
 EntrySpecification = str
+
+
+@total_ordering
+@dataclass(frozen=True)
+class EntryKey:
+    s: str
+
+    def __lt__(self, other):
+        return self.s < str(other)
+
+    def __eq__(self, other):
+        return self.s == str(other)
+
+    def __str__(self) -> str:
+        return self.s
+
+    def is_auxiliary(self):
+        return self.s.startswith(AUX_KEY_PREFIX)
+
+    def title(self):
+        return self.s.removeprefix(AUX_KEY_PREFIX).title()
 
 
 @dataclass(frozen=True)
@@ -180,12 +202,14 @@ class RemainderDistributionConstraint(DistributionConstraint):
 class Score:
     points: EffortPoints = EffortPoints(0)
     hours: EffortHours = EffortHours(0)
+    auxiliary_points: EffortPoints = EffortPoints(0)
     auxiliary_hours: EffortHours = EffortHours(0)
     percent_effort: EffortPercent = EffortPercent(0)
 
     def __iadd__(self, other: "Score") -> "Score":
         self.points += other.points
         self.hours += other.hours
+        self.auxiliary_points += other.auxiliary_points
         self.auxiliary_hours += other.auxiliary_hours
         return self
 
@@ -194,6 +218,7 @@ class Score:
         for attrname in [
             "points",
             "hours",
+            "auxiliary_points",
             "auxiliary_hours",
             "percent_effort",
         ]:
@@ -223,7 +248,7 @@ class Entry:
         return Score()
 
     def is_auxiliary(self):
-        return self.key.startswith("z-")
+        return self.key.is_auxiliary()
 
 
 @dataclass(frozen=True)
@@ -238,15 +263,19 @@ class PointsEntry(Entry):
     ) -> Optional["PointsEntry"]:
         try:
             key_and_points = spec.split(maxsplit=1)
-            key = key_and_points[0].strip().lower()
+            key = EntryKey(key_and_points[0].strip().lower())
             points = EffortPoints(ast.literal_eval(key_and_points[1]))
             return cls(key, points)
         except ValueError:
             return None
 
     def as_score(self) -> Score:
-        """TODO decide if auxiliary points should be tracked anyway"""
-        return Score(points=0 if self.is_auxiliary() else self.points)
+        s = Score()
+        if self.is_auxiliary():
+            s.auxiliary_points = self.points
+        else:
+            s.points = self.points
+        return s
 
 
 @dataclass(frozen=True)
@@ -262,7 +291,7 @@ class HoursEntry(Entry):
         before_and_hours_and_after = RE_NUMBER_OF_HOURS.split(spec, maxsplit=1)
         if len(before_and_hours_and_after) != 3:
             return None
-        key = before_and_hours_and_after[0].strip().lower()
+        key = EntryKey(before_and_hours_and_after[0].strip().lower())
         hours = ast.literal_eval(before_and_hours_and_after[1])
         return cls(key, hours)
 
@@ -460,13 +489,13 @@ def run(stdin, /) -> None:
     ic(remaining_hours)
     hours_per_point = remaining_hours / book_totals.points
     ic(hours_per_point)
-    keywidth = max(len(_) for _ in book_summary.keys())
+    keywidth = max(len(str(_)) for _ in book_summary.keys())
     msgfmt = f"{{:5.1f}} {{:5.1f}} {{:7.1%}} {{:7.1%}} {{:{keywidth}}} {{}}"
     total_percent_effort = 0
     total_adjusted_percent_effort = 0
     total_to_be_allocated_hours = EffortHours(0)
     for key, score in book_summary.items():
-        account_name = key.upper()
+        account_name = str(key).upper()
         hours_equivalent = hours_per_point * score.points
         to_be_allocated_hours = EffortHours(0)
         percent_effort = score.points / book_totals.points
@@ -496,7 +525,7 @@ def run(stdin, /) -> None:
             to_be_allocated_hours,
             adjusted_percent_effort,
             percent_effort,
-            key,
+            str(key),
             score,
         )
         print(msg)
