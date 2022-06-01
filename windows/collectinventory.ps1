@@ -107,9 +107,9 @@ if ($OutputAsJson) {
 }
 $Win32Packages | ForEach-Object {
     New-Object PSObject -Property ($WhereWhen + [ordered] @{
+            Status               = $_.Status
             Name                 = $_.Name
             Version              = $_.Version
-            Status               = $_.Status
             FullPath             = $_.FullPath
             
             # AppliesToMedia             = $_.AppliesToMedia
@@ -220,6 +220,54 @@ $AppxProvisionedPackages | ForEach-Object {
 
 ##########
 
+$Tag = 'WindowsOptionalFeature'
+$AllWindowsOptionalFeatures = Get-WindowsOptionalFeature -Online -FeatureName *
+# $EnabledWindowsOptionalFeatures = $AllWindowsOptionalFeatures | Where-Object { $_.State -eq 'Enabled' }
+if ($OutputAsJson) {
+    $AllWindowsOptionalFeatures | ConvertTo-Json -Depth 1 | Set-Content -Path "${Prefix}${Tag}.json"
+}
+$AllWindowsOptionalFeatures | ForEach-Object {
+    New-Object PSObject -Property ($WhereWhen + [ordered] @{
+            State       = $_.State
+            FeatureName = $_.FeatureName
+
+            # CustomProperties = $_.CustomProperties
+            Description = $_.Description
+            DisplayName = $_.DisplayName
+            # LogLevel         = $_.LogLevel
+            # LogPath          = $_.LogPath
+            # Online           = $_.Online
+            # Path             = $_.Path
+            # RestartNeeded    = $_.RestartNeeded
+            # RestartRequired  = $_.RestartRequired        
+            # ScratchDirectory = $_.ScratchDirectory
+            # SysDrivePath     = $_.SysDrivePath
+            # WinPath          = $_.WinPath
+        })
+} | Export-Csv -NoTypeInformation -Path "${Prefix}${Tag}.csv"
+
+##########
+
+$Tag = 'WindowsCapability'
+$AllWindowsCapabilities = Get-WindowsCapability -Online -LimitAccess -Name *
+# $InstalledWindowsCapabilities = $AllWindowsCapabilities | Where-Object { $_.State -eq 'Installed' }
+if ($OutputAsJson) {
+    $AllWindowsCapabilities | ConvertTo-Json -Depth 1 | Set-Content -Path "${Prefix}${Tag}.json"
+}
+$AllWindowsCapabilities | ForEach-Object {
+    New-Object PSObject -Property ($WhereWhen + [ordered] @{
+            State        = $_.State
+            Name         = $_.Name
+
+            Description  = $_.Description
+            DisplayName  = $_.DisplayName
+            DownloadSize = $_.DownloadSize
+            InstallSize  = $_.InstallSize
+        })
+} | Export-Csv -NoTypeInformation -Path "${Prefix}${Tag}.csv"
+
+##########
+
 $Tag = 'Service'
 $ExcludedProperties = @(
     'CimInstanceProperties',
@@ -248,9 +296,10 @@ if ($OutputAsJson) {
 }
 $Services | ForEach-Object {
     New-Object PSObject -Property ($WhereWhen + [ordered] @{
-            Name               = $_.Name
-            ServiceType        = $_.ServiceType
             CimClass           = $_.CimClass
+            ServiceType        = $_.ServiceType
+            StartMode          = $_.StartMode
+            Name               = $_.Name
 
             Caption            = $_.Caption
             CompatID           = $_.CompatID
@@ -271,7 +320,6 @@ $Services | ForEach-Object {
             Manufacturer       = $_.Manufacturer
             Signer             = $_.Signer
             Started            = $_.Started
-            StartMode          = $_.StartMode
             Status             = $_.Status
         })
 } | Export-Csv -NoTypeInformation -Path "${Prefix}${Tag}.csv"
