@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 import ast
-from functools import total_ordering
 import math
 import re
 import string
 import sys
+from collections import defaultdict
 from collections.abc import KeysView, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from functools import total_ordering
 from logging import warning
 from typing import Optional, TextIO, Type, cast
 from urllib.parse import urlparse
@@ -119,6 +122,11 @@ EntrySpecification = str
 class EntryKey:
     s: str
 
+    @classmethod
+    def from_str(cls, s: str) -> EntryKey:
+        if s:
+            return cls(s.strip())
+
     def __lt__(self, other):
         return self.s < str(other)
 
@@ -229,7 +237,13 @@ class Score:
 
 
 class Summary(dict[EntryKey, Score]):
-    ...
+    def __getitem__(self, __k: EntryKey) -> Score:
+        try:
+            return super().__getitem__(__k)
+        except KeyError:
+            sc = Score()
+            self[__k] = sc
+            return sc
 
 
 @dataclass(frozen=True)
@@ -378,13 +392,30 @@ class Book:
         }
         return r
 
+    def distribute(self) -> bool:
+        # TODO while book.distribute(): print book?
+        for key in self.keys():
+            constraints = self.distribution_constraints_by_entry_key.get(
+                key, DistributionConstraintByAccountNameDict()
+            )
+            count = len(constraints)
+            if count:
+                days_to_remove = set()
+                for day, entry in self.entries_for_key(key).items():
+                    days_to_remove.add(day)
+                    for constraint in constraints.values():
+                        # TODO distribute current entry to constrained entries?
+                        ...
+                for day in days_to_remove:
+                    del self.entries_by_day_and_key[(day, key)]
+                return True
+        return False
+
     def summarize(self) -> Summary:
         self.summary.clear()
         for key in self.keys():
-            score = Score()
-            self.summary[key] = score
-            for day, entry in self.entries_for_key(key).items():
-                score += entry.as_score()
+            for _, entry in self.entries_for_key(key).items():
+                self.summary[key] += entry.as_score()
         return self.summary
 
     def auxiliary_table(self) -> Table:
@@ -442,13 +473,14 @@ def parse_as_spreadsheet_url(line: str, /) -> Optional[str]:
 def parse_as_entry_key_and_distribution_constraint_set(
     line: str,
     /,
-) -> Optional[tuple[str, set[DistributionConstraint]]]:
+) -> Optional[tuple[EntryKey, set[DistributionConstraint]]]:
     key_and_specs = line.split(":", maxsplit=1)
     if len(key_and_specs) == 1:
         return None
     else:
-        key = key_and_specs[0].lower()
-        spec_list = [str(_).strip() for _ in key_and_specs[1].split(";")]
+        key, specs = key_and_specs
+        key = key.strip().lower()
+        spec_list = [str(_).strip() for _ in specs.split(";")]
         constraints = set()
         for spec in spec_list:
             for cls in [HourDistributionConstraint, RemainderDistributionConstraint]:
@@ -457,7 +489,7 @@ def parse_as_entry_key_and_distribution_constraint_set(
                 if constraint:
                     constraints.add(constraint)
                     break
-        return key, constraints
+        return EntryKey.from_str(key), constraints
 
 
 def parse_as_day_and_entry_list(
