@@ -18,11 +18,21 @@ $UpdateSearcher = $UpdateSession.CreateUpdateSearcher()
 $UpdateSearcher.ServerSelection = 3 # ssOthers
 $UpdateSearcher.ServiceID = $UpdateService.ServiceID
 
-Write-Progress 'Searching for updates...'
+Write-Progress -Activity 'Searching for updates...'
 $SearchResult = $UpdateSearcher.Search('IsInstalled=0')
+Write-Progress -Activity 'Searching for updates...' -Completed
 
-$Updates = $SearchResult.Updates
-if ($Updates.Count -lt 1) {
+$global:MissingMicrosoftUpdates = $SearchResult.Updates
+if ($global:MissingMicrosoftUpdates.Count -lt 1) {
     Write-Warning 'There are no applicable updates.'
 }
-return $Updates
+else {
+    $global:MissingMicrosoftUpdates | ForEach-Object {
+        [PSCustomObject]@{
+            KBs       = $_.KBArticleIDs -join ','
+            Bulletins = $_.SecurityBulletinIDs -join ','
+            Title     = $_.Title
+        }
+    } | Format-Table -AutoSize | Out-String | Write-Warning
+    Write-Warning 'Note: The list of missing updates is stored in $MissingMicrosoftUpdates'
+}
