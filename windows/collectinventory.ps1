@@ -25,9 +25,12 @@ $Prefix = "$ResultsDirectoryName\$WhereWhenS "
 
 New-Item -ItemType Directory -Path . -Name $ResultsDirectoryName | Out-Null
 
+$ProgressActivity = 'Collecting inventory'
+
 ##########
 
 $Tag = 'LocalUser'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 $LocalUsers = Get-LocalUser | Sort-Object -Property Name
 if ($OutputAsJson) {
     $LocalUsers | ConvertTo-Json -Depth 1 | Set-Content -Path "${Prefix}${Tag}.json"
@@ -68,6 +71,7 @@ $LocalGroupsWithMembers = $LocalGroups | ForEach-Object {
 }
 
 $Tag = 'LocalGroup'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 if ($OutputAsJson) {
     $LocalGroups | ConvertTo-Json -Depth 1 | Set-Content -Path "${Prefix}${Tag}.json"
 }
@@ -83,6 +87,7 @@ $LocalGroups | ForEach-Object {
 } | Export-Csv -NoTypeInformation -Path "${Prefix}${Tag}.csv"
 
 $Tag = 'LocalGroupMember'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 if ($OutputAsJson) {
     $LocalGroupsWithMembers | ConvertTo-Json -Depth 2 | Set-Content -Path "${Prefix}${Tag}.json"
 }
@@ -101,6 +106,7 @@ $LocalGroupsWithMembers | ForEach-Object {
 ##########
 
 $Tag = 'Win32 Package'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 $Win32Packages = Get-Package -AllVersions -IncludeWindowsInstaller -IncludeSystemComponent | Sort-Object -Property Name, Version
 if ($OutputAsJson) {
     $Win32Packages | ConvertTo-Json -Depth 1 | Set-Content -Path "${Prefix}${Tag}.json"
@@ -145,6 +151,7 @@ $Win32Packages | ForEach-Object {
 ##########
 
 $Tag = 'AppxPackage AllUsers'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 $AppxPackages = @("Bundle", "Framework", "Main", "Resource", "None") | ForEach-Object {
     Get-AppxPackage -AllUsers -PackageTypeFilter $_ | Add-Member 'PackageType' $_ -PassThru
 } | Sort-Object -Property Name, Version
@@ -186,6 +193,7 @@ $AppxPackages | ForEach-Object {
 ##########
 
 $Tag = 'AppxProvisionedPackage'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 $AppxProvisionedPackages = Get-AppxProvisionedPackage -Online | Sort-Object -Property DisplayName, Version
 if ($OutputAsJson) {
     $AppxProvisionedPackages | ConvertTo-Json -Depth 1 | Set-Content -Path "${Prefix}${Tag}.json"
@@ -221,6 +229,7 @@ $AppxProvisionedPackages | ForEach-Object {
 ##########
 
 $Tag = 'WindowsOptionalFeature'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 $AllWindowsOptionalFeatures = Get-WindowsOptionalFeature -Online -FeatureName *
 # $EnabledWindowsOptionalFeatures = $AllWindowsOptionalFeatures | Where-Object { $_.State -eq 'Enabled' }
 if ($OutputAsJson) {
@@ -249,6 +258,7 @@ $AllWindowsOptionalFeatures | ForEach-Object {
 ##########
 
 $Tag = 'WindowsCapability'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 $AllWindowsCapabilities = Get-WindowsCapability -Online -LimitAccess -Name *
 # $InstalledWindowsCapabilities = $AllWindowsCapabilities | Where-Object { $_.State -eq 'Installed' }
 if ($OutputAsJson) {
@@ -269,6 +279,7 @@ $AllWindowsCapabilities | ForEach-Object {
 ##########
 
 $Tag = 'Service'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 $ExcludedProperties = @(
     'CimInstanceProperties',
     'CimSystemProperties',
@@ -327,6 +338,7 @@ $Services | ForEach-Object {
 ##########
 
 $Tag = 'RSoP'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 foreach ($ReportExtension in ('xml', 'html')) {
     $GPResultOption = '/' + $ReportExtension[0]
     & gpresult.exe /scope computer $GPResultOption "${Prefix}${Tag} Computer.${ReportExtension}"
@@ -338,9 +350,12 @@ foreach ($ReportExtension in ('xml', 'html')) {
 ##########
 
 $Tag = 'AuditPol'
+Write-Progress -Activity $ProgressActivity -CurrentOperation $Tag
 & auditpol /backup "/file:${Prefix}${Tag}-Computer.csv"
 $LocalUsers | ForEach-Object {
     & auditpol /get "/user:$($_.Name)" /category:* /r > "${Prefix}${Tag} User $($_.Name).csv"
 }
 
 ##########
+
+Write-Progress -Activity $ProgressActivity -Completed
