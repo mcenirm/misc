@@ -323,3 +323,24 @@ $Services | ForEach-Object {
             Status             = $_.Status
         })
 } | Export-Csv -NoTypeInformation -Path "${Prefix}${Tag}.csv"
+
+##########
+
+$Tag = 'RSoP'
+foreach ($ReportExtension in ('xml', 'html')) {
+    $GPResultOption = '/' + $ReportExtension[0]
+    & gpresult.exe /scope computer $GPResultOption "${Prefix}${Tag} Computer.${ReportExtension}"
+    $LocalUsers | ForEach-Object {
+        & gpresult.exe /scope user /user $_.Name $GPResultOption "${Prefix}${Tag} User $($_.Name).${ReportExtension}"
+    }
+}
+
+##########
+
+$Tag = 'AuditPol'
+& auditpol /backup "/file:${Prefix}${Tag}-Computer.csv"
+$LocalUsers | ForEach-Object {
+    & auditpol /get "/user:$($_.Name)" /category:* /r > "${Prefix}${Tag} User $($_.Name).csv"
+}
+
+##########
