@@ -358,4 +358,10 @@ $LocalUsers | ForEach-Object {
 
 ##########
 
+# TODO (maybe)
+# $Tag = 'Microsoft Defender Antivirus'
+# Get-MpComputerStatus | Export-Csv ...
+
+##########
+
 Write-Progress -Activity $ProgressActivity -Completed
