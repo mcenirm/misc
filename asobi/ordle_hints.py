@@ -18,11 +18,12 @@ DEFAULT_WORDLISTS = list(
         ),
     )
 )
+DEFAULT_WORD_LENGTH = 5
 
 
 def load_words(
     paths: list[pathlib.Path],
-    word_length: int | None = None,
+    word_length: int,
 ) -> typing.Generator[str, None, None]:
     """load words
 
@@ -35,7 +36,7 @@ def load_words(
         with path.open() as f:
             for line in f:
                 word = "".join(map(str.lower, filter(str.isalpha, line)))
-                if word_length is not None and len(word) == word_length:
+                if len(word) == word_length:
                     yield word
 
 
@@ -105,9 +106,6 @@ class WordSet(set[str]):
         """
 
         self.discard_words_unless(lambda w: character in w)
-
-
-DEFAULT_ALLOWED_WORDS = WordSet(load_words(DEFAULT_WORDLISTS, word_length=5))
 
 
 class LetterScore(enum.Enum):
@@ -304,16 +302,47 @@ def decode_shorthand(shorthand: str) -> ScoredWord:
     return ScoredWord(word=word, scores=scores)
 
 
-def main() -> None:
-    args = sys.argv[1:]
-    if not args:
-        return
+def is_starter_arg(first_arg: str) -> bool:
+    """
 
-    n = 8
-    g = Game(words=DEFAULT_ALLOWED_WORDS)
+    >>> is_starter_arg(".")
+    True
+    >>> is_starter_arg("........")
+    True
+    >>> is_starter_arg("foo")
+    False
+
+    """
+    return set(first_arg) == set(".")
+
+
+def determine_word_length(first_arg: str) -> int:
+    """
+
+    >>> determine_word_length("...")
+    3
+    >>> determine_word_length("abcd:nnnn,nnnn")
+    4
+
+    """
+    return (
+        len(first_arg)
+        if is_starter_arg(first_arg=first_arg)
+        else len(decode_shorthand(first_arg).word)
+    )
+
+
+def main() -> None:
+    args = sys.argv[1:] or ["." * DEFAULT_WORD_LENGTH]
+    word_length = determine_word_length(args[0])
+    n = max(5, 44 // word_length)
+    g = Game(words=WordSet(load_words(DEFAULT_WORDLISTS, word_length)))
     for shorthand in args:
-        scored_word = decode_shorthand(shorthand=shorthand)
-        remaining_words = g.play(scored_word=scored_word)
+        try:
+            scored_word = decode_shorthand(shorthand=shorthand)
+            remaining_words = g.play(scored_word=scored_word)
+        except ValueError:
+            remaining_words = g.words
         rwn = len(remaining_words)
         if rwn > n:
             remaining_words = random.sample(sorted(remaining_words), n)
