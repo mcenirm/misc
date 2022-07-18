@@ -20,6 +20,10 @@ DEFAULT_WORDLISTS = list(
 )
 DEFAULT_WORD_LENGTH = 5
 
+# TODO maybe include one of the English Wikipedia frequency lists at
+#      https://github.com/IlyaSemenov/wikipedia-word-frequency/tree/master/results
+#      for future ranking of guesses
+
 
 def load_words(
     paths: list[pathlib.Path],
