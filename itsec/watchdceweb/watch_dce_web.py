@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses as _dataclasses
+import datetime as _datetime
 import pathlib as _pathlib
 
 from icecream import ic
@@ -19,11 +20,13 @@ downloads = <path to downloads folder>
 @_dataclasses.dataclass(kw_only=True, frozen=True)
 class Artifact:
     url: str
-    download_name: str | None = None
+    download_name: str = ""
 
     def __post_init__(self):
-        if self.download_name is None:
-            guess = guess_download_name_from_url(url=self.url)
+        if self.download_name == "":
+            guess = guess_download_name_from_url2(url=self.url)
+            if guess is None:
+                raise ValueError("unable to guess download name for url", self.url)
             object.__setattr__(self, "download_name", guess)
 
 
@@ -31,26 +34,83 @@ def guess_download_name_from_url(*, url: str) -> str | None:
     """
 
     >>> guess_download_name_from_url(url=None)
-    >>> guess_download_name_from_url(url="data:...")
+    >>> guess_download_name_from_url(url="data:text/plain,test%20text%0D%0A")
     >>> guess_download_name_from_url(url="https://example.com/")
     'example.com.html'
     >>> guess_download_name_from_url(url="https://example.com/file.txt")
     'file.txt'
+    >>> guess_download_name_from_url(url="https://example.com/path/file.txt")
+    'file.txt'
+    >>> guess_download_name_from_url(url="https://example.com/search?")
+    'example.com--search.html'
     >>> guess_download_name_from_url(url="https://example.com/search?q=a%20b")
-    'example.com__search__q=a%20b.html'
-    >>> guess_download_name_from_url(url="https://example.com/search.json?q=a%20b")
-    'example.com__search__q=a%20b.json'
+    'example.com--search--q=a%20b.html'
+    >>> guess_download_name_from_url(url="https://example.com/api/search?q=a%20b")
+    'example.com--api--search--q=a%20b.html'
+    >>> guess_download_name_from_url(url="https://example.com/api/search.json?q=a%20b")
+    'example.com--api--search--q=a%20b.json'
 
     """
 
+    from pathlib import PurePosixPath
     from urllib.parse import urlparse
 
     parsed = urlparse(url=url, allow_fragments=True)
-    if (parsed.path or "/") == "/":
-        ...
-    if not parsed.query:
-        ...
-    return None
+    if url is None or parsed.scheme == "data":
+        return None
+    if parsed.hostname and (parsed.path or "/") == "/" and not parsed.query:
+        return parsed.hostname + ".html"
+    guess = PurePosixPath(parsed.path)
+    if guess.suffix and not parsed.query:
+        return guess.name
+    suffix, guess = (guess.suffix or ".html"), guess.with_suffix("")
+    guess = parsed.hostname + str(guess).replace("/", "--")
+    if parsed.query:
+        guess += "--" + parsed.query
+    guess += suffix
+    return guess
+
+
+def guess_download_name_from_url2(*, url: str) -> str | None:
+    """
+
+    >>> guess_download_name_from_url2(url=None)
+    >>> guess_download_name_from_url2(url="data:text/plain,test%20text%0D%0A")
+    >>> guess_download_name_from_url2(url="https://example.com/")
+    'example.com.html'
+    >>> guess_download_name_from_url2(url="https://example.com/file.txt")
+    'example.com/file.txt'
+    >>> guess_download_name_from_url2(url="https://example.com/path/file.txt")
+    'example.com/path/file.txt'
+    >>> guess_download_name_from_url2(url="https://example.com/path/")
+    'example.com/path.html'
+    >>> guess_download_name_from_url2(url="https://example.com/search?")
+    'example.com/search.html'
+    >>> guess_download_name_from_url2(url="https://example.com/search?q=a%20b")
+    'example.com/search--q=a%20b.html'
+    >>> guess_download_name_from_url2(url="https://example.com/api/search?q=a%20b")
+    'example.com/api/search--q=a%20b.html'
+    >>> guess_download_name_from_url2(url="https://example.com/api/search.json?q=a%20b")
+    'example.com/api/search--q=a%20b.json'
+
+    """
+
+    from pathlib import PurePosixPath
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url=url, allow_fragments=True)
+    if url is None or parsed.scheme == "data":
+        return None
+    path = PurePosixPath(parsed.path.removeprefix("/"))
+    suffix = path.suffix
+    if suffix:
+        path = path.with_suffix("")
+    path = PurePosixPath(parsed.hostname) / path
+    guess = str(path)
+    if parsed.query:
+        guess += "--" + parsed.query
+    guess += suffix or ".html"
+    return guess
 
 
 def refresh_local_settings(
@@ -134,10 +194,17 @@ def retrieve(*, url: str, download_to: _pathlib.Path) -> _pathlib.Path:
     return real_downloaded_to
 
 
+def file_age(path: _pathlib.Path) -> _datetime.timedelta:
+    from datetime import timedelta
+    from time import time
+
+    return timedelta(seconds=time() - path.stat().st_mtime)
+
+
 def main() -> None:
     from configparser import ConfigParser
+    from datetime import timedelta
     from pathlib import Path
-    from urllib.parse import urlparse
 
     refresh_local_settings()
     cp = ConfigParser()
@@ -147,14 +214,12 @@ def main() -> None:
     web = settings["web"]
     downloads = Path(settings["downloads"])
     downloads.mkdir(exist_ok=True, parents=True)
-    webparsed = urlparse(web)
-    ic(webparsed)
-    webname = webparsed.hostname
-    if (webparsed.path or "/") != "/":
-        webname += "__" + webparsed.path.replace("/", "__")
-    webcopy = downloads / (webname + ".html")
-    webcopy = retrieve(url=web, download_to=webcopy)
-    ic(webcopy, webcopy.stat())
+    web_artifact = Artifact(url=web)
+    web_copy = downloads / web_artifact.download_name
+    too_recent = web_copy.is_file() and file_age(web_copy) < timedelta(minutes=30)
+    if not too_recent:
+        web_copy = retrieve(url=web, download_to=web_copy)
+    ic(web_copy, web_copy.stat())
 
 
 if __name__ == "__main__":
