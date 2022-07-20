@@ -1,3 +1,9 @@
+# TODO (mabye)
+# * do not keep old revisions of artifacts
+# * extract important details from artifacts and store in a history
+# * generate report showing changes of important details
+
+
 from __future__ import annotations
 
 import dataclasses as _dataclasses
