@@ -2,22 +2,49 @@
 
 <#
 .SYNOPSIS
-    Generates Event Viewer custom view files from a CSV file.
+    Convert event view table to Event Viewer custom view files
 #>
 
 param (
-    [Parameter(Mandatory)]    
-    [string]$CSVFile
+    [Parameter(
+        Mandatory = $true,
+        Position = 0,
+        ParameterSetName = "LiteralPath",
+        ValueFromPipelineByPropertyName = $true,
+        HelpMessage = "Literal path to one or more CSV files.")]
+    [Alias("PSPath")]
+    [ValidateNotNullOrEmpty()]
+    [string[]]
+    $LiteralPath,
+
+    [Parameter(
+        Mandatory = $true,
+        ParameterSetName = "LiteralPath",
+        HelpMessage = "Literal path to output folder.")]
+    [ValidateNotNullOrEmpty()]
+    [string]
+    $OutFolder,
+
+    [Parameter(
+        ParameterSetName = "LiteralPath",
+        HelpMessage = "Optional prefix for custom view names.")]
+    [string]
+    $ViewPrefix = $null,
+
+    [string]
+    $CategoryHeading = 'Audit Event Category',
+
+    [string]
+    $LogHeading = 'Log',
+
+    [string]
+    $EventIdHeading = 'Current Windows Event ID'
 )
 
 
 Set-Variable -Option Constant -Name InvalidFileNameCharsRegex `
     -Value ('[{0}]' -f [RegEx]::Escape(([IO.Path]::GetInvalidFileNameChars() -join '')))
 
-# These values need to match the CSV headings
-Set-Variable -Option Constant -Name CategoryHeading -Value 'Audit Event Category'
-Set-Variable -Option Constant -Name CriticalityHeading -Value 'Potential Criticality'
-Set-Variable -Option Constant -Name EventIdHeading -Value 'Current Windows Event ID'
 
 # XML template strings
 Set-Variable -Option Constant -Name ViewerConfigTemplate -Value @'
@@ -88,38 +115,53 @@ function New-EventViewerConfigXml {
 }
 
 
-$OutFolder = Join-Path -Path $PSScriptRoot -ChildPath 'out'
 if (-not (Test-Path -PathType Container -LiteralPath $OutFolder)) {
     New-Item -ItemType Directory -Path $OutFolder -Verbose | Out-Null
 }
+$OutFolder = Resolve-Path -LiteralPath $OutFolder
 
-$Data = Import-Csv -Path $CSVFile
+$Data = Import-Csv -LiteralPath $LiteralPath
 
+$Logs = @{}
 $CategoryGroups = @{}
 foreach ($EventRecord in $Data) {
     $EventId = $EventRecord.$EventIdHeading -as [int]
     if (-not $EventId) { continue }
 
-    $CategoryNames = -split $EventRecord.$CategoryHeading `
+    $CategoryNames = $EventRecord.$CategoryHeading -split "`r`n" `
     | ForEach-Object { $_.ToLower() -replace ',', '' } `
     | Where-Object { $_ } `
     | Get-Unique -AsString
-    
+
     foreach ($CategoryName in $CategoryNames) {
         if (-not $CategoryGroups.ContainsKey($CategoryName)) {
             $CategoryGroups[$CategoryName] = [System.Collections.Generic.List[string]]::new()
         }
         $CategoryGroups[$CategoryName].Add($EventId)
+        $Logs[$CategoryName] = $EventRecord.$LogHeading
     }
 }
 
 foreach ($CategoryName in $CategoryGroups.Keys) {
-    $CleanedName = $CategoryName -replace $InvalidFileNameCharsRegex, '_'
-    $OutXMLName = 'ViewerConfig ' + $CleanedName + ".xml"
+    $ViewName = $CategoryName
+    if ($ViewPrefix -ne $null) {
+        $ViewName = $ViewPrefix + ' ' + $CategoryName
+    }
+    $CleanedName = $ViewName -replace $InvalidFileNameCharsRegex, '_'
+
+    $OutXMLName = $CleanedName + ".xml"
     $OutXMLFile = Join-Path -Path $OutFolder -ChildPath $OutXMLName
 
     $EventIdList = $CategoryGroups[$CategoryName]
-    
-    $ViewerConfigXml = New-EventViewerConfigXml -Name $CategoryName -EventIdList $EventIdList
+
+    $NEVCXArgs = @{
+        Name        = $CleanedName
+        EventIdList = $EventIdList
+    }
+    $Log = $Logs[$CategoryName]
+    if ($Log -ne $null) {
+        $NEVCXArgs['ChannelPath'] = $Log
+    }
+    $ViewerConfigXml = New-EventViewerConfigXml @NEVCXArgs
     $ViewerConfigXml.Save($OutXMLFile)
 }
