@@ -67,12 +67,37 @@ Set-Variable -Option Constant -Name ViewerConfigTemplate -Value @'
             </QueryList>
         </QueryNode>
     </QueryConfig>
+    <ResultsConfig>
+        <Columns>
+            <Column Name="Level" Type="System.String" Path="Event/System/Level" Visible="">136</Column>
+            <Column Name="Keywords" Type="System.String" Path="Event/System/Keywords" Visible="">70</Column>
+            <Column Name="Date and Time" Type="System.DateTime" Path="Event/System/TimeCreated/@SystemTime" Visible="">186</Column>
+            <Column Name="Source" Type="System.String" Path="Event/System/Provider/@Name" Visible="">96</Column>
+            <Column Name="Event ID" Type="System.UInt32" Path="Event/System/EventID" Visible="">96</Column>
+            <Column Name="Task Category" Type="System.String" Path="Event/System/Task" Visible="">100</Column>
+            <Column Name="User" Type="System.String" Path="Event/System/Security/@UserID" Visible="">50</Column>
+            <Column Name="Operational Code" Type="System.String" Path="Event/System/Opcode" Visible="">110</Column>
+            <Column Name="Log" Type="System.String" Path="Event/System/Channel" Visible="">80</Column>
+            <Column Name="Computer" Type="System.String" Path="Event/System/Computer" Visible="">170</Column>
+            <Column Name="Process ID" Type="System.UInt32" Path="Event/System/Execution/@ProcessID" Visible="">70</Column>
+            <Column Name="Thread ID" Type="System.UInt32" Path="Event/System/Execution/@ThreadID" Visible="">70</Column>
+            <Column Name="Processor ID" Type="System.UInt32" Path="Event/System/Execution/@ProcessorID" Visible="">90</Column>
+            <Column Name="Session ID" Type="System.UInt32" Path="Event/System/Execution/@SessionID" Visible="">70</Column>
+            <Column Name="Kernel Time" Type="System.UInt32" Path="Event/System/Execution/@KernelTime" Visible="">80</Column>
+            <Column Name="User Time" Type="System.UInt32" Path="Event/System/Execution/@UserTime" Visible="">70</Column>
+            <Column Name="Processor Time" Type="System.UInt32" Path="Event/System/Execution/@ProcessorTime" Visible="">100</Column>
+            <Column Name="Correlation Id" Type="System.Guid" Path="Event/System/Correlation/@ActivityID" Visible="">85</Column>
+            <Column Name="Relative Correlation Id" Type="System.Guid" Path="Event/System/Correlation/@RelatedActivityID" Visible="">140</Column>
+            <Column Name="Event Source Name" Type="System.String" Path="Event/System/Provider/@EventSourceName" Visible="">140</Column>
+        </Columns>
+    </ResultsConfig>
 </ViewerConfig>
 '@
 Set-Variable -Option Constant -Name SelectExpressionFormat -Value '*[System[({0})]]'
-Set-Variable -Option Constant -Name SelectConjunction -Value ' or '
-Set-Variable -Option Constant -Name SelectTermFormat -Value 'EventID={0}'
-
+Set-Variable -Option Constant -Name SelectConjunction -Value ' and '
+Set-Variable -Option Constant -Name SelectDisjunction -Value ' or '
+Set-Variable -Option Constant -Name SelectSingleTermFormat -Value 'EventID={0}'
+Set-Variable -Option Constant -Name SelectRangeTermFormat -Value ('(EventID >= {0}', 'EventID <= {1})' -join $SelectConjunction)
 
 function New-EventViewerConfigXml {
     [CmdletBinding()]
@@ -91,15 +116,40 @@ function New-EventViewerConfigXml {
     $IntegerEventIDList = $EventIDList | ForEach-Object { [int]$_ }
     $SortedEventIDList = $IntegerEventIDList | Sort-Object -Unique
 
-    $SelectTermList = $SortedEventIDList | ForEach-Object { $SelectTermFormat -f $_ }
-    $SelectTermText = $SelectTermList -join $SelectConjunction
+    # collapse consecutive numbers into ranges
+    $IdPairs = [System.Collections.ArrayList]::new()
+    foreach ($Id in $SortedEventIDList) {
+        if ($IdPairs.Count -eq 0 -or $IdPairs[-1][-1] -ne ($Id - 1) ) {
+            [void]$IdPairs.Add(@($Id, $Id))
+        }
+        else {
+            $IdPairs[-1][-1] = $Id
+        }
+    }
+
+    # form query terms
+    $SimpleEventIdList = [string[]]::new($IdPairs.Count)
+    $SelectTermList = [string[]]::new($IdPairs.Count)
+    for ($i = 0; $i -lt $IdPairs.Count; $i++) {
+        [string]$Left = $IdPairs[$i][0]
+        [string]$Right = $IdPairs[$i][-1]
+        if ($Left -eq $Right) {
+            $SimpleEventIdList[$i] = $Left
+            $SelectTermList[$i] = $SelectSingleTermFormat -f $Left
+        }
+        else {
+            $SimpleEventIdList[$i] = $Left, $Right -join '-'
+            $SelectTermList[$i] = $SelectRangeTermFormat -f $Left, $Right
+        }
+    }
+    $SelectTermText = $SelectTermList -join $SelectDisjunction
     $SelectText = $SelectExpressionFormat -f $SelectTermText
 
     [xml]$x = $ViewerConfigTemplate
 
     $Simple = $x.ViewerConfig.QueryConfig.QueryParams.Simple
     $Simple.Channel = $ChannelPath
-    $Simple.EventId = $SortedEventIDList -join ','
+    $Simple.EventId = $SimpleEventIDList -join ','
 
     $QueryNode = $x.ViewerConfig.QueryConfig.QueryNode
     $QueryNode.Name = $Name
@@ -129,7 +179,7 @@ foreach ($EventRecord in $Data) {
     if (-not $EventId) { continue }
 
     $CategoryNames = $EventRecord.$CategoryHeading -split "`r`n" `
-    | ForEach-Object { $_.ToLower() -replace ',', '' } `
+    | ForEach-Object { $_.ToLower() -replace ', ', '' } `
     | Where-Object { $_ } `
     | Get-Unique -AsString
 
@@ -159,7 +209,7 @@ foreach ($CategoryName in $CategoryGroups.Keys) {
         EventIdList = $EventIdList
     }
     $Log = $Logs[$CategoryName]
-    if ($Log -ne $null) {
+    if ($null -ne $Log) {
         $NEVCXArgs['ChannelPath'] = $Log
     }
     $ViewerConfigXml = New-EventViewerConfigXml @NEVCXArgs
