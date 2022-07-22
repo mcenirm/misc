@@ -70,12 +70,12 @@ Set-Variable -Option Constant -Name ViewerConfigTemplate -Value @'
     <ResultsConfig>
         <Columns>
             <Column Name="Level" Type="System.String" Path="Event/System/Level" Visible="">136</Column>
-            <Column Name="Keywords" Type="System.String" Path="Event/System/Keywords" Visible="">70</Column>
             <Column Name="Date and Time" Type="System.DateTime" Path="Event/System/TimeCreated/@SystemTime" Visible="">186</Column>
-            <Column Name="Source" Type="System.String" Path="Event/System/Provider/@Name" Visible="">96</Column>
             <Column Name="Event ID" Type="System.UInt32" Path="Event/System/EventID" Visible="">96</Column>
+            <Column Name="Keywords" Type="System.String" Path="Event/System/Keywords" Visible="">70</Column>
             <Column Name="Task Category" Type="System.String" Path="Event/System/Task" Visible="">100</Column>
             <Column Name="User" Type="System.String" Path="Event/System/Security/@UserID" Visible="">50</Column>
+            <Column Name="Source" Type="System.String" Path="Event/System/Provider/@Name" Visible="">96</Column>
             <Column Name="Operational Code" Type="System.String" Path="Event/System/Opcode" Visible="">110</Column>
             <Column Name="Log" Type="System.String" Path="Event/System/Channel" Visible="">80</Column>
             <Column Name="Computer" Type="System.String" Path="Event/System/Computer" Visible="">170</Column>
