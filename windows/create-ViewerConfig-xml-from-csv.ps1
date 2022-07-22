@@ -179,7 +179,7 @@ foreach ($EventRecord in $Data) {
     if (-not $EventId) { continue }
 
     $CategoryNames = $EventRecord.$CategoryHeading -split "`r`n" `
-    | ForEach-Object { $_.ToLower() -replace ', ', '' } `
+    | ForEach-Object -MemberName ToLower `
     | Where-Object { $_ } `
     | Get-Unique -AsString
 
@@ -197,7 +197,7 @@ foreach ($CategoryName in $CategoryGroups.Keys) {
     if ($ViewPrefix -ne $null) {
         $ViewName = $ViewPrefix + ' ' + $CategoryName
     }
-    $CleanedName = $ViewName -replace $InvalidFileNameCharsRegex, '_'
+    $CleanedName = $ViewName -replace $InvalidFileNameCharsRegex, ' '
 
     $OutXMLName = $CleanedName + ".xml"
     $OutXMLFile = Join-Path -Path $OutFolder -ChildPath $OutXMLName
