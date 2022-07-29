@@ -30,11 +30,18 @@ def main():
         print(grab(settings.feed))
 
 
-def grab(feed: FeedSettings) -> pathlib.Path:
+def grab(feed: FeedSettings, previous_prefix: str = "previous.") -> pathlib.Path:
     from shutil import copy2
     from urllib.request import urlretrieve
 
-    pathlib.Path(feed.file).unlink(missing_ok=True)
+    previous = pathlib.Path(feed.file)
+    if previous.is_symlink():
+        previous.rename(previous.with_stem(previous_prefix + previous.stem))
+    elif previous.exists():
+        raise FileExistsError(
+            "expected existing feed file to be a symlink",
+            feed.file,
+        )
     tmpf, msg = urlretrieve(url=feed.url)
     dest = copy2(tmpf, feed.file)
     target = replace_with_symlink_based_on_feed_date(pathlib.Path(dest))
