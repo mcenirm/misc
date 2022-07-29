@@ -32,7 +32,7 @@ def main():
 
 def grab(feed: FeedSettings, previous_prefix: str = "previous.") -> pathlib.Path:
     from shutil import copy2
-    from urllib.request import urlretrieve
+    from urllib.request import urlretrieve, urlcleanup
 
     previous = pathlib.Path(feed.file)
     if previous.is_symlink():
@@ -42,8 +42,12 @@ def grab(feed: FeedSettings, previous_prefix: str = "previous.") -> pathlib.Path
             "expected existing feed file to be a symlink",
             feed.file,
         )
-    tmpf, msg = urlretrieve(url=feed.url)
-    dest = copy2(tmpf, feed.file)
+    try:
+        tmpf, msg = urlretrieve(url=feed.url)
+        dest = copy2(tmpf, feed.file)
+    finally:
+        # TODO maybe add a setting to skip cleanup and show tmpf,msg for troubleshooting?
+        urlcleanup()
     target = replace_with_symlink_based_on_feed_date(pathlib.Path(dest))
     headers_path = pathlib.Path(str(target) + ".headers.txt")
     with headers_path.open("w") as f:
