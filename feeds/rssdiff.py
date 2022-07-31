@@ -52,24 +52,22 @@ class RssElement:
         from inspect import get_annotations
         from types import UnionType
 
+        field_map = {f.name: f for f in dataclasses.fields(cls)}
         class_annotations = get_annotations(cls, eval_str=True)
         extras = []
         kwargs = {"_elem": elem, "_extras": extras}
         for child in elem:
             field_name = QNAME_FIELD_MAP.get(child.tag, child.tag)
+            field = field_map.get(field_name)
             annotation = class_annotations.get(field_name)
             annotation_args = typing.get_args(annotation)
-            match annotation:
-                case UnionType():
-                    if str in annotation_args:
-                        kwargs[field_name] = innertext(child)
-                case None:
-                    extras.append(child)
-                case _:
-                    ic(annotation, type(annotation))
-                    raise NotImplementedError(
-                        "TODO don't know how to handle annotation"
-                    )
+            if isinstance(annotation, UnionType) and str in annotation_args:
+                kwargs[field_name] = innertext(child)
+            elif annotation is None and field is None:
+                extras.append(child)
+            else:
+                ic(field_name, annotation, type(annotation), annotation_args, field)
+                raise NotImplementedError("TODO don't know how to handle field")
         return cls(**kwargs)
 
 
