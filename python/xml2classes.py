@@ -1,28 +1,40 @@
 from __future__ import annotations
 
-import collections
-import dataclasses
-import sys
-import typing
+import ast as _ast
+import collections as _collections
+import dataclasses as _dataclasses
+import io as _io
+import sys as _sys
+import typing as _typing
 import xml.etree.ElementTree as _ET
 
 from icecream import ic
 from rich import inspect as ri
 
 
-@dataclasses.dataclass(kw_only=True, frozen=True)
+@_dataclasses.dataclass(kw_only=True, frozen=True)
 class ConnectionCounter:
     tag: str
-    parents: dict = dataclasses.field(
-        default_factory=lambda: collections.defaultdict(int)
+    parents: dict = _dataclasses.field(
+        default_factory=lambda: _collections.defaultdict(int)
     )
 
 
-@dataclasses.dataclass(kw_only=True, frozen=True)
+@_dataclasses.dataclass(kw_only=True, frozen=True)
 class TagNameAndUri:
+    """
+
+    >>> t = TagNameAndUri(tag="a")
+    >>> t.uri, t.name
+    (None, 'a')
+    >>> t = TagNameAndUri(tag="{urn:x}a")
+    >>> t.uri, t.name
+    ('urn:x', 'a')
+    """
+
     tag: str
-    uri: str | None = dataclasses.field(init=False)
-    name: str = dataclasses.field(init=False)
+    uri: str | None = _dataclasses.field(init=False)
+    name: str = _dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
         uri, name = split_tag(self.tag)
@@ -30,7 +42,7 @@ class TagNameAndUri:
         object.__setattr__(self, "name", name)
 
 
-@dataclasses.dataclass(kw_only=True, frozen=True)
+@_dataclasses.dataclass(kw_only=True, frozen=True)
 class XmlnsPrefixMarker:
     uri: str | None
     prefix: str | None
@@ -99,8 +111,14 @@ def get_xmlns_uri_from_qualified_tag(tag: str) -> str | None:
     return None
 
 
-@dataclasses.dataclass(kw_only=True, frozen=True)
+@_dataclasses.dataclass(kw_only=True, frozen=True)
 class ClassFromElement:
+    """
+
+    >>> _ast.unparse(ClassFromElement.from_(_mxt("<a/>").getroot()).as_ast())
+    'class a:\\n    ...'
+    """
+
     tag: TagNameAndUri
 
     @classmethod
@@ -112,15 +130,34 @@ class ClassFromElement:
     def update(self, data):
         ...
 
+    def as_ast(self) -> _ast.ClassDef:
+        return _ast.ClassDef(
+            name=self.tag.name,
+            bases=[],
+            keywords=[],
+            body=[
+                _ast.Expr(value=_ast.Constant(value=Ellipsis)),
+            ],
+            decorator_list=[],
+        )
+
 
 class Builder:
+    """
+
+    >>> Builder().load(_mxf("<a/>")).build()[0].tag.uri is None
+    True
+    >>> Builder().load(_mxf("<a xmlns='urn:x'/>")).build()[0].tag.uri
+    'urn:x'
+    """
+
     def __init__(self) -> None:
         self.root: _ET.Element | None = None
-        self.nsmap = collections.defaultdict(lambda: collections.defaultdict(list))
+        self.nsmap = _collections.defaultdict(lambda: _collections.defaultdict(list))
         self.classmap: dict[str, ClassFromElement] = {}
         self.parentmap: dict[_ET.Element, _ET.Element] = {}
 
-    def load(self, f: typing.TextIO):
+    def load(self, f: _io.TextIO) -> Builder:
         ns_queue = []
         for event, data in _ET.iterparse(
             f, events=["start", "end", "comment", "pi", "start-ns", "end-ns"]
@@ -141,9 +178,13 @@ class Builder:
                         self.classmap[data.tag] = cfe
                     cfe.update(data)
         self.parentmap.update(build_parent_map(self.root))
+        return self
+
+    def build(self) -> list[ClassFromElement]:
+        return list(self.classmap.values())
 
 
-class keydefaultdict(collections.defaultdict):
+class keydefaultdict(_collections.defaultdict):
     "https://stackoverflow.com/a/2912455"
 
     def __missing__(self, key):
@@ -159,7 +200,7 @@ def build_parent_map(root: _ET.Element) -> dict[_ET.Element, _ET.Element]:
 
 
 CLASS_TEMPLATE_1 = """
-@dataclasses.dataclass(kw_only=True, frozen=True)
+@_dataclasses.dataclass(kw_only=True, frozen=True)
 class {}
 """
 
@@ -240,18 +281,110 @@ def print_clunky_parent_child_table(counts: dict[str, ConnectionCounter]) -> Non
         )
 
 
-def main():
+class ElementTreeParentMap(_typing.Mapping[_ET.Element, _ET.Element]):
+    """
+
+    >>> tree, pmap = _mtp("<a><b><c1/><c2/></b></a>")
+    >>> root = tree.getroot()
+    >>> b = root.find("b")
+    >>> c1 = b.find("c1")
+    >>> pmap[root] is None
+    True
+    >>> pmap[b] == root
+    True
+    >>> pmap[c1] == b
+    True
+    >>> tuple(map(len, map(set, (pmap, pmap.keys(), pmap.values()))))
+    (4, 4, 3)
+    """
+
+    def __init__(self, tree: _ET.ElementTree) -> None:
+        self._tree = tree
+        self._map = dict()
+        self._map[tree.getroot()] = None
+        for p in tree.iter():
+            for c in p:
+                self._map[c] = p
+
+    def __getitem__(self, key: _ET.Element) -> _ET.Element:
+        return self._map[key]
+
+    def __iter__(self) -> _typing.Iterator[_ET.Element]:
+        return iter(self._map)
+
+    def __len__(self) -> int:
+        return len(self._map)
+
+    def ancestors(self, e: _ET.Element) -> _typing.Generator[_ET.Element, None, None]:
+        """
+
+        >>> tree, pmap = _mtp("<a><b><c1/><c2/></b></a>")
+        >>> c2 = tree.getroot()[0][1]
+        >>> c2.tag
+        'c2'
+        >>> for p in pmap.ancestors(c2):
+        ...     p.tag
+        'b'
+        'a'
+        """
+        p = e
+        while (p := self[p]) is not None:
+            yield p
+
+
+def short_tag(tag: str) -> str:
+    """
+
+    >>> short_tag("foo")
+    'foo'
+    >>> short_tag("{foo}bar")
+    'bar'
+    """
+    return tag.split("}")[-1]
+
+
+def _mtp(x: str) -> tuple[_ET.ElementTree, ElementTreeParentMap]:
+    tree = _mxt(x)
+    pmap = ElementTreeParentMap(tree)
+    return tree, pmap
+
+
+def _mxt(x: str) -> _ET.ElementTree:
+    from io import StringIO
+
+    return _ET.parse(StringIO(x))
+
+
+def _mxf(x: str) -> _io.TextIO:
+    from io import StringIO
+
+    f = StringIO(x)
+    return f
+
+
+def run(infile: _io.TextIO, outfile: _io.TextIO | None = None) -> None:
+    """
+
+    >>> run(_mxf("<a/>"))
+    class a:
+        ...
+    """
+
+    print_kwargs = dict()
+    if outfile is not None:
+        print_kwargs["file"] = outfile
     bldr = Builder()
-    bldr.load(sys.stdin)
-    ic(bldr.root.tag, bldr.root.attrib, len(bldr.root))
-    counts = count_connections(bldr.root)
-    print_clunky_parent_child_table(counts=counts)
-    # root_class = ClassFromElement.from_(bldr.root)
-    # ic(root_class)
+    bldr.load(infile)
+    for cfe in bldr.build():
+        print(_ast.unparse(cfe.as_ast()), **print_kwargs)
+
+
+def main():
+    run(_sys.stdin, _sys.stdout)
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--doctest"]:
+    if _sys.argv[1:] == ["--doctest"]:
         import doctest
 
         doctest.testmod(optionflags=doctest.FAIL_FAST)
