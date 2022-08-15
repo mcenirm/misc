@@ -368,6 +368,12 @@ def run(infile: _io.TextIO, outfile: _io.TextIO | None = None) -> None:
     >>> run(_mxf("<a/>"))
     class a:
         ...
+    >>> run(_mxf("<a xmlns='urn:x'/>"))
+    class a:
+        ...
+    >>> run(_mxf("<x:a xmlns:x='urn:x'/>"))
+    class a:
+        ...
     """
 
     print_kwargs = dict()
