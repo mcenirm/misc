@@ -1,86 +1,86 @@
-Worry,Token,Grammatic Value,Associativity,Description,Effect
-associativity,,(,,parentheses,
-associativity,,),,parentheses,
-associativity,,as,left,casting operator,
-associativity,,exists,left,unary operator,
-associativity,,not exists,left,unary operator,
-associativity,,not,left,unary operator,
-associativity,,-,left,unary operator,
-associativity,,*,left,products,
-associativity,,/,left,products,
-associativity,,mod,left,products,
-associativity,,&,left,products,
-associativity,,+,left,addition,
-associativity,,-,left,addition,
-associativity,,=,,relations,
-associativity,,!=,,relations,
-associativity,,<,,relations,
-associativity,,<=,,relations,
-associativity,,>,,relations,
-associativity,,>=,,relations,
-associativity,,and,left,AND,
-associativity,,or,left,OR,
-associativity,,",",,Tuple,
-associativity,,;,left,plural,
-operator,&,&,,,The string concatenation operator.
-operator,",",",",,,The tuple operator. Creates a tuple of objects.
-operator,;,;,,,The collection operator. Collects its operands into one plural result.
-operator,+,+,,,The sum operator.
-operator,-,-,,,The subtraction operator.
-operator,*,*,,,The multiplication operator.
-operator,/,/,,,The division operator.
-operator,=,relation,,,Equivalent to the ‘is’ keyword.
-operator,!=,relation,,,Equivalent to ‘is not’.
-operator,<,relation,,,The ‘less than’ operator.
-operator,<=,relation,,,The ‘less than or equal to’ operator.
-operator,>,relation,,,The ‘greater than’ operator.
-operator,>=,relation,,,The ‘greater than or equal to’ operator.
-keyword,a,<none>,,,Ignored by the relevance evaluator. Used to improve readability.
-keyword,an,<none>,,,Ignored by the relevance evaluator. Used to improve readability.
-keyword,and,and,,,The logical AND operator. Doesn’t evaluate the right hand side if the left hand side is false.
-keyword,as,as,,,"The typecast operator, used to convert one type to another."
-keyword,contains,relation,,,Returns TRUE when a string contains another string as a substring.
-keyword,does not contain,relation,,,Equivalent to ‘not contains’.
-keyword,does not end with,relation,,,Returns TRUE when a string does not end with the specified substring.
-keyword,does not equal,relation,,,Equivalent to ‘is not’.
-keyword,does not start with,relation,,,Returns TRUE when a string does not start with the specified substring.
-keyword,else,else,,,Denotes the alternative path in an ‘if-then-else’ statement.
-keyword,ends with,relation,,,Returns TRUE when a string ends with the specified substring.
-keyword,equals,relation,,,Equivalent to ‘is’.
-keyword,exist,exists,,,Returns a boolean TRUE / FALSE indicating whether an object exists.
-keyword,exist no,not exists,,,Equivalent to ‘not exist’.
-keyword,exists,exists,,,Equivalent to ‘exist’.
-keyword,exists no,not exists,,,Equivalent to ‘not exist’.
-keyword,if,if,,,The keyword to begin an ‘if-then-else’ expression.
-keyword,is,relation,,,Returns TRUE when two objects are equal. Note that not all objects can be tested for equality. Equivalent to the ‘=’ operator.
-keyword,is contained by,relation,,,Returns TRUE when a string contains another string as a substring.
-keyword,is equal to,relation,,,Equivalent to ‘is’.
-keyword,is greater than,relation,,,The ‘>’ comparison.
-keyword,is greater than or equal to,relation,,,The ‘>=’ comparison.
-keyword,is less than,relation,,,The ‘<’ comparison.
-keyword,is less than or equal to,relation,,,The ‘<=’ comparison.
-keyword,is not,relation,,,Returns TRUE when two objects are not equal. Note that not all objects can be compared with this keyword.
-keyword,is not contained by,relation,,,Returns TRUE when a string does not contain another string as a substring.
-keyword,is not equal to,relation,,,Equivalent to the keyword ‘is not’ and the ‘!=’ operator.
-keyword,is not greater than,relation,,,Equivalent to is less than or equal to or ‘<=’.
-keyword,is not greater than or equal to,relation,,,Equivalent to is less than or ‘<’.
-keyword,is not less than,relation,,,Equivalent to is greater than or equal to or ‘>=’.
-keyword,is not less than or equal to,relation,,,Equivalent to is greater than or ‘>’.
-keyword,it,it,,,A reference to the closest direct object or ‘whose’ clause.
-keyword,item,phrase,,,Used to index into a tuple. Always returns a singular value.
-keyword,items,phrase,,,"Equivalent to item, but returns a plural value."
-keyword,mod,mod,,,The modulo operator.
-keyword,not,relation,,,The logical NOT operator.
-keyword,number,phrase,,,Returns the number of results in an expression.
-keyword,of,of,,,Used to access a property of an object.
-keyword,or,or,,,The logical OR operator. Doesn’t evaluate the right hand side if the left hand side is true.
-keyword,starts with,relation,,,Returns TRUE when a string begins with the specified substring.
-keyword,the,<none>,,,Ignored by the relevance evaluator. Used to improve readability.
-keyword,then,then,,,Denotes the main path to take in an if-then-else expression.
-keyword,there do not exist,not exists,,,Equivalent to ‘not exist’.
-keyword,there does not exist,not exists,,,Equivalent to ‘not exist’.
-keyword,there exist,exists,,,Equivalent to ‘exist’.
-keyword,there exist no,not exists,,,Equivalent to ‘not exist’.
-keyword,there exists,exists,,,Equivalent to ‘exist’.
-keyword,there exists no,not exists,,,Equivalent to ‘not exist’.
-keyword,whose,whose,,,Used along with the ‘it’ keyword to filter plural results.
+Worry,Token,Grammatic Value,Original GV,Associativity,Description,Precedence,Effect
+associativity,,(,(,,parentheses,1,
+associativity,,),),,parentheses,1,
+associativity,,as,as,left,casting operator,2,
+associativity,,exists,exists,left,unary operator,3,
+associativity,,not exists,not exists,left,unary operator,3,
+associativity,,not,not,left,unary operator,3,
+associativity,,-,-,left,unary operator,3,
+associativity,,*,*,left,products,4,
+associativity,,/,/,left,products,4,
+associativity,,mod,mod,left,products,4,
+associativity,,&,&,left,products,4,
+associativity,,+,+,left,addition,5,
+associativity,,-,-,left,addition,5,
+associativity,,relation,=,,relations,6,
+associativity,,relation,!=,,relations,6,
+associativity,,relation,<,,relations,6,
+associativity,,relation,<=,,relations,6,
+associativity,,relation,>,,relations,6,
+associativity,,relation,>=,,relations,6,
+associativity,,and,and,left,AND,7,
+associativity,,or,or,left,OR,8,
+associativity,,",",",",,Tuple,9,
+associativity,,;,;,left,plural,10,
+operator,&,&,,,,,The string concatenation operator.
+operator,",",",",,,,,The tuple operator. Creates a tuple of objects.
+operator,;,;,,,,,The collection operator. Collects its operands into one plural result.
+operator,+,+,,,,,The sum operator.
+operator,-,-,,,,,The subtraction operator.
+operator,*,*,,,,,The multiplication operator.
+operator,/,/,,,,,The division operator.
+operator,=,relation,,,,,Equivalent to the ‘is’ keyword.
+operator,!=,relation,,,,,Equivalent to ‘is not’.
+operator,<,relation,,,,,The ‘less than’ operator.
+operator,<=,relation,,,,,The ‘less than or equal to’ operator.
+operator,>,relation,,,,,The ‘greater than’ operator.
+operator,>=,relation,,,,,The ‘greater than or equal to’ operator.
+keyword,a,<none>,,,,,Ignored by the relevance evaluator. Used to improve readability.
+keyword,an,<none>,,,,,Ignored by the relevance evaluator. Used to improve readability.
+keyword,and,and,,,,,The logical AND operator. Doesn’t evaluate the right hand side if the left hand side is false.
+keyword,as,as,,,,,"The typecast operator, used to convert one type to another."
+keyword,contains,relation,,,,,Returns TRUE when a string contains another string as a substring.
+keyword,does not contain,relation,,,,,Equivalent to ‘not contains’.
+keyword,does not end with,relation,,,,,Returns TRUE when a string does not end with the specified substring.
+keyword,does not equal,relation,,,,,Equivalent to ‘is not’.
+keyword,does not start with,relation,,,,,Returns TRUE when a string does not start with the specified substring.
+keyword,else,else,,,,,Denotes the alternative path in an ‘if-then-else’ statement.
+keyword,ends with,relation,,,,,Returns TRUE when a string ends with the specified substring.
+keyword,equals,relation,,,,,Equivalent to ‘is’.
+keyword,exist,exists,,,,,Returns a boolean TRUE / FALSE indicating whether an object exists.
+keyword,exist no,not exists,,,,,Equivalent to ‘not exist’.
+keyword,exists,exists,,,,,Equivalent to ‘exist’.
+keyword,exists no,not exists,,,,,Equivalent to ‘not exist’.
+keyword,if,if,,,,,The keyword to begin an ‘if-then-else’ expression.
+keyword,is,relation,,,,,Returns TRUE when two objects are equal. Note that not all objects can be tested for equality. Equivalent to the ‘=’ operator.
+keyword,is contained by,relation,,,,,Returns TRUE when a string contains another string as a substring.
+keyword,is equal to,relation,,,,,Equivalent to ‘is’.
+keyword,is greater than,relation,,,,,The ‘>’ comparison.
+keyword,is greater than or equal to,relation,,,,,The ‘>=’ comparison.
+keyword,is less than,relation,,,,,The ‘<’ comparison.
+keyword,is less than or equal to,relation,,,,,The ‘<=’ comparison.
+keyword,is not,relation,,,,,Returns TRUE when two objects are not equal. Note that not all objects can be compared with this keyword.
+keyword,is not contained by,relation,,,,,Returns TRUE when a string does not contain another string as a substring.
+keyword,is not equal to,relation,,,,,Equivalent to the keyword ‘is not’ and the ‘!=’ operator.
+keyword,is not greater than,relation,,,,,Equivalent to is less than or equal to or ‘<=’.
+keyword,is not greater than or equal to,relation,,,,,Equivalent to is less than or ‘<’.
+keyword,is not less than,relation,,,,,Equivalent to is greater than or equal to or ‘>=’.
+keyword,is not less than or equal to,relation,,,,,Equivalent to is greater than or ‘>’.
+keyword,it,it,,,,,A reference to the closest direct object or ‘whose’ clause.
+keyword,item,phrase,,,,,Used to index into a tuple. Always returns a singular value.
+keyword,items,phrase,,,,,"Equivalent to item, but returns a plural value."
+keyword,mod,mod,,,,,The modulo operator.
+keyword,not,relation,,,,,The logical NOT operator.
+keyword,number,phrase,,,,,Returns the number of results in an expression.
+keyword,of,of,,,,,Used to access a property of an object.
+keyword,or,or,,,,,The logical OR operator. Doesn’t evaluate the right hand side if the left hand side is true.
+keyword,starts with,relation,,,,,Returns TRUE when a string begins with the specified substring.
+keyword,the,<none>,,,,,Ignored by the relevance evaluator. Used to improve readability.
+keyword,then,then,,,,,Denotes the main path to take in an if-then-else expression.
+keyword,there do not exist,not exists,,,,,Equivalent to ‘not exist’.
+keyword,there does not exist,not exists,,,,,Equivalent to ‘not exist’.
+keyword,there exist,exists,,,,,Equivalent to ‘exist’.
+keyword,there exist no,not exists,,,,,Equivalent to ‘not exist’.
+keyword,there exists,exists,,,,,Equivalent to ‘exist’.
+keyword,there exists no,not exists,,,,,Equivalent to ‘not exist’.
+keyword,whose,whose,,,,,Used along with the ‘it’ keyword to filter plural results.

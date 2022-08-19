@@ -19,13 +19,13 @@ class Effect:
 
     @classmethod
     def from_effect_text(cls, text: str) -> Effect:
-        from re import match
+        # from re import match
 
-        if m := match(
-            "Equivalent to the \N{LEFT SINGLE QUOTATION MARK}(.*)\N{RIGHT SINGLE QUOTATION MARK} keyword.",
-            text,
-        ):
-            ic(m)
+        # if m := match(
+        #     "Equivalent to the \N{LEFT SINGLE QUOTATION MARK}(.*)\N{RIGHT SINGLE QUOTATION MARK} keyword.",
+        #     text,
+        # ):
+        #     ic(m)
         return Effect(text=text)
 
 
@@ -40,12 +40,15 @@ class GrammaticValue(str, _enum.Enum):
     logical_and = "and"
     logical_or = "or"
     mod = "mod"
+    left_parentheses = "("
     multiplication = "*"
+    not_ = "not"
     not_exists = "not exists"
     of = "of"
     phrase = "phrase"
     readability = "<none>"
     relation = "relation"
+    right_parentheses = ")"
     string_concatenation = "&"
     subtraction = "-"
     sum = "+"
@@ -379,6 +382,132 @@ class Token(_enum.Enum):
         return obj
 
 
+class Associativity(_enum.Enum):
+    left = "left"
+
+
+class Rule(_enum.Enum):
+    parentheses = (
+        "parentheses",
+        1,
+        {
+            GrammaticValue.left_parentheses,
+            GrammaticValue.right_parentheses,
+        },
+    )
+    casting_operator = (
+        "casting operator",
+        2,
+        {
+            GrammaticValue.typecast,
+        },
+        Associativity.left,
+    )
+    unary_operator = (
+        "unary operator",
+        3,
+        {
+            GrammaticValue.exists,
+            GrammaticValue.not_,
+            GrammaticValue.not_exists,
+            GrammaticValue.subtraction,
+        },
+        Associativity.left,
+    )
+    products = (
+        "products",
+        4,
+        {
+            GrammaticValue.string_concatenation,
+            GrammaticValue.mod,
+            GrammaticValue.multiplication,
+            GrammaticValue.division,
+        },
+        Associativity.left,
+    )
+    addition = (
+        "addition",
+        5,
+        {
+            GrammaticValue.subtraction,
+            GrammaticValue.sum,
+        },
+        Associativity.left,
+    )
+    relations = (
+        "relations",
+        6,
+        {
+            GrammaticValue.relation,
+        },
+    )
+    and_ = (
+        "AND",
+        7,
+        {
+            GrammaticValue.logical_and,
+        },
+        Associativity.left,
+    )
+    or_ = (
+        "OR",
+        8,
+        {
+            GrammaticValue.logical_or,
+        },
+        Associativity.left,
+    )
+    tuple = (
+        "Tuple",
+        9,
+        {
+            GrammaticValue.tuple,
+        },
+    )
+    plural = (
+        "plural",
+        10,
+        {
+            GrammaticValue.collection,
+        },
+        Associativity.left,
+    )
+
+    def __new__(
+        cls,
+        description: str,
+        precedence: int,
+        grammatic_values: _typing.Iterable[GrammaticValue],
+        associativity: Associativity | None = None,
+    ):
+        obj = object.__new__(cls)
+        obj._value_ = description
+        obj.precedence = precedence
+        obj.grammatic_values = set(grammatic_values)
+        obj.associativity = associativity
+        return obj
+
+    def __ge__(self, other):
+        if self.__class__ is other.__class__:
+            return self.precedence >= other.precedence
+        return NotImplemented
+
+    def __gt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.precedence > other.precedence
+        return NotImplemented
+
+    def __le__(self, other):
+        if self.__class__ is other.__class__:
+            return self.precedence <= other.precedence
+        return NotImplemented
+
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.precedence < other.precedence
+        return NotImplemented
+
+
 def run(infile: _typing.TextIO, outfile: _typing.TextIO):
     ...
 
@@ -399,6 +528,7 @@ def grammar_checklist(
     grammatic_value_key="Grammatic Value",
     associativity_key="Associativity",
     description_key="Description",
+    precedence_key="Precedence",
     effect_key="Effect",
 ):
     from csv import DictReader
@@ -411,25 +541,121 @@ def grammar_checklist(
     # my_module_classes = [obj for _, obj in my_module_members if isclass(obj)]
     with open(grammar_csv, encoding="utf-8") as f:
         reader = DictReader(f)
+        unexpected_rules_by_description = dict()
         for row in reader:
             worry = row[worry_key]
+            gv_text = row[grammatic_value_key]
+            try:
+                gv = GrammaticValue(gv_text)
+            except ValueError as ve:
+                raise ValueError("Unexpected grammatic value", gv_text, row) from ve
             if worry in {operator_marker, keyword_marker}:
                 token_text = row[token_key]
-                gv_text = row[grammatic_value_key]
                 effect_text = row[effect_key]
-                try:
-                    gv = GrammaticValue(gv_text)
-                except ValueError as ve:
-                    raise ValueError("Unexpected grammatic value", gv_text, row) from ve
                 try:
                     token = Token(token_text)
                 except ValueError as ve:
                     raise ValueError("Unexpected token", token_text, row) from ve
             elif worry == associativity_marker:
                 # TODO implement checks for associativity
-                ...
+                desc_text = row[description_key]
+                assoc_text = row[associativity_key]
+                prec_text = row[precedence_key]
+                if not desc_text:
+                    raise ValueError("Missing description for associativity", row)
+                try:
+                    assoc = Associativity(assoc_text) if assoc_text else None
+                except ValueError as ve:
+                    raise ValueError("Unexpected associativity", assoc_text, row)
+                try:
+                    rule = Rule(desc_text)
+                except ValueError as ve:
+                    if len(Rule):
+                        raise ValueError(
+                            "Unexpected rule description", desc_text, row
+                        ) from ve
+                    else:
+                        if desc_text not in unexpected_rules_by_description:
+                            unexpected_rules_by_description[desc_text] = (
+                                desc_text,
+                                prec_text,
+                                assoc,
+                                set(),
+                            )
+                        unexpected_rules_by_description[desc_text][3].add(gv)
+                    ...
             else:
                 raise ValueError("unexpected worry: " + worry)
+    for (
+        desc_text,
+        prec_text,
+        assoc,
+        gvs,
+    ) in unexpected_rules_by_description.values():
+        args = []
+        name = _snake(desc_text)
+        from keyword import iskeyword
+
+        if iskeyword(name):
+            name += "_"
+        args.append(repr(desc_text))
+        args.append(prec_text)
+        args.append(
+            "".join(
+                [
+                    "{",
+                    ", ".join(
+                        [".".join([gv.__class__.__name__, gv.name]) for gv in gvs]
+                    ),
+                    ",}",
+                ]
+            )
+        )
+        if assoc:
+            args.append(".".join([assoc.__class__.__name__, assoc.name]))
+        print("   ", name, "=", "".join(["(", ", ".join(args), ",)"]))
+        ...
+
+
+def _snake(s: str) -> str | None:
+    from re import sub
+    from unicodedata import category, normalize
+
+    if not s:
+        return None
+
+    s = normalize("NFC", s)
+    chs = []
+    pch = s[0]
+    pchcat = category(pch)
+    if pch.islower() or pch.isnumeric():
+        chs.append(pch)
+    elif pch.isupper():
+        chs.append(pch.lower())
+    for ch in s[1:]:
+        chcat = category(ch)
+        match list(pchcat + chcat):
+            case ["L" | "N" | "P" | "Z", _, "L", "l"] | ["L" | "N" | "P", _, "N", "d"]:
+                chs.append(ch)
+            case ["P" | "S" | "Z", _, "P" | "S", _]:
+                pass
+            case ["L" | "N" | "P" | "S" | "Z", _, "P" | "S" | "Z", _]:
+                chs.append(" ")
+            case ["L", "l", "L", "u"] | ["N", "d", "L", "u"]:
+                chs.append(" ")
+                chs.append(ch.lower())
+            case ["L", "u", "L", "u"] | ["P" | "S" | "Z", _, "L", "u"]:
+                chs.append(ch.lower())
+            case _:
+                raise ValueError("Unhandled", pchcat, chcat)
+        pch = ch
+        pchcat = chcat
+    if not chs:
+        return None
+    s = "".join(chs)
+    s = s.strip()
+    s = sub(r"\s+", "_", s)
+    return s
 
 
 def _devmain():
