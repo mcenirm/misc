@@ -377,9 +377,40 @@ class Token(_enum.Enum):
     ):
         obj = object.__new__(cls)
         obj._value_ = text
-        obj.grammatic_value = grammatic_value
-        obj.effect = Effect.from_effect_text(effect_text)
+        obj._grammatic_value = grammatic_value
+        obj._effect = Effect.from_effect_text(effect_text)
         return obj
+
+    @property
+    def grammatic_value(self) -> GrammaticValue:
+        return self._grammatic_value
+
+    @property
+    def effect(self) -> Effect:
+        return self._effect
+
+
+class ExtraToken(_enum.Enum):
+    left_parenthesis = ("(", GrammaticValue.left_parentheses)
+    right_parenthesis = (")", GrammaticValue.right_parentheses)
+
+    def __new__(
+        cls,
+        text: str,
+        grammatic_value: GrammaticValue,
+    ):
+        obj = object.__new__(cls)
+        obj._value_ = text
+        obj._grammatic_value = grammatic_value
+        return obj
+
+    @property
+    def grammatic_value(self) -> GrammaticValue:
+        return self._grammatic_value
+
+    @property
+    def effect(self) -> Effect:
+        return Effect(text="")
 
 
 class Associativity(_enum.Enum):
@@ -482,10 +513,26 @@ class Rule(_enum.Enum):
     ):
         obj = object.__new__(cls)
         obj._value_ = description
-        obj.precedence = precedence
-        obj.grammatic_values = set(grammatic_values)
-        obj.associativity = associativity
+        obj._precedence = precedence
+        obj._grammatic_values = set(grammatic_values)
+        obj._associativity = associativity
         return obj
+
+    @property
+    def description(self) -> str:
+        return self.value
+
+    @property
+    def precedence(self) -> int:
+        return self._precedence
+
+    @property
+    def grammatic_values(self) -> set[GrammaticValue]:
+        return self._grammatic_values
+
+    @property
+    def associativity(self) -> Associativity | None:
+        return self._associativity
 
     def __ge__(self, other):
         if self.__class__ is other.__class__:
@@ -508,8 +555,98 @@ class Rule(_enum.Enum):
         return NotImplemented
 
 
-def run(infile: _typing.TextIO, outfile: _typing.TextIO):
+class Expression:
     ...
+
+
+@_dataclasses.dataclass(frozen=True)
+class Term:
+    original_text: str
+    normalized_text: str | None = None
+    token: Token | ExtraToken | None = None
+
+    @classmethod
+    def from_text(text: str) -> tuple[Term, str]:
+        # TODO
+        ...
+
+
+class TermBuilder:
+    def __init__(self, first_ch: str, chindex: int, linenum: int, colnum: int) -> None:
+        self.chs = [first_ch]
+        self.chindexs = [chindex]
+        self.linenums = [linenum]
+        self.colnums = [colnum]
+
+    def append(self, ch: str, chindex: int, linenum: int, colnum: int) -> TermBuilder:
+        self.chs.append(ch)
+        self.chindexs.append(chindex)
+        self.linenums.append(linenum)
+        self.colnums.append(colnum)
+        return self
+
+    def resolve(self) -> Term:
+        from itertools import chain
+        from re import sub
+
+        text = "".join(self.chs)
+        normalized_text = sub(r"\s+", " ", text)
+        longest_match_token = None
+        longest_match_length = 0
+        for t in chain(ExtraToken, Token):
+            if normalized_text.startswith(t.value):
+                if len(t.value) > longest_match_length:
+                    longest_match_token = t
+                    longest_match_length = len(t.value)
+        if longest_match_token:
+            return Term(text=text, token=longest_match_token)
+
+
+class ParseState(_enum.Enum):
+    expecting_expression = _enum.auto()
+    identifier_or_keyword = _enum.auto()
+
+
+def parse(f: _typing.TextIO):
+    from unicodedata import category
+
+    stack = []
+    state = ParseState.expecting_expression
+    chindex = 0
+    linenum = 1
+    colnum = 1
+    builder = None
+    while ch := f.read(1):
+        eof = len(ch) < 1
+        chcat = None if eof else category(ch)
+        match state, eof, chcat, ch:
+            case ParseState.expecting_expression, True, _, _:
+                break
+            case ParseState.expecting_expression, _, _, ExtraToken.left_parenthesis.value:
+                stack.append(dict(chindex=chindex, linenum=linenum, colnum=colnum))
+                state = ParseState.expecting_expression
+            case ParseState.expecting_expression, _, "Ll", _:
+                builder = TermBuilder(ch, chindex, linenum, colnum)
+                state = ParseState.identifier_or_keyword
+            case ParseState.identifier_or_keyword, _, "Ll" | "Zs", _:
+                builder.append(ch, chindex, linenum, colnum)
+                state = ParseState.identifier_or_keyword
+            case ParseState.identifier_or_keyword, _, _, ExtraToken.right_parenthesis.value:
+                term = builder.resolve()
+                builder.append(ch, chindex, linenum, colnum)
+                state = ParseState.identifier_or_keyword
+            case _:
+                raise ValueError("panic", state, eof, chcat, ch)
+        chindex += len(ch)
+    if stack:
+        ...
+    if builder:
+        ...
+
+
+def run(infile: _typing.TextIO, outfile: _typing.TextIO):
+    for expr in parse(infile):
+        print(expr.indent(), file=outfile)
 
 
 def main() -> None:
@@ -542,6 +679,10 @@ def grammar_checklist(
     with open(grammar_csv, encoding="utf-8") as f:
         reader = DictReader(f)
         unexpected_rules_by_description = dict()
+        existing_rule_names_and_gv_names = set(
+            [(r.name, g.name) for r in Rule for g in r.grammatic_values]
+        )
+        loaded_rule_names_and_gv_names = set()
         for row in reader:
             worry = row[worry_key]
             gv_text = row[grammatic_value_key]
@@ -569,6 +710,7 @@ def grammar_checklist(
                     raise ValueError("Unexpected associativity", assoc_text, row)
                 try:
                     rule = Rule(desc_text)
+                    loaded_rule_names_and_gv_names.add((rule.name, gv.name))
                 except ValueError as ve:
                     if len(Rule):
                         raise ValueError(
@@ -583,37 +725,51 @@ def grammar_checklist(
                                 set(),
                             )
                         unexpected_rules_by_description[desc_text][3].add(gv)
-                    ...
+                if rule.precedence != int(prec_text):
+                    raise ValueError("Mismatched rule precedence", prec_text, rule, row)
+                if rule.associativity != assoc:
+                    raise ValueError("Mismatched rule associativity", assoc, rule, row)
+                if gv not in rule.grammatic_values:
+                    raise ValueError("Mismatched rule grammatic value", gv, rule, row)
             else:
                 raise ValueError("unexpected worry: " + worry)
-    for (
-        desc_text,
-        prec_text,
-        assoc,
-        gvs,
-    ) in unexpected_rules_by_description.values():
-        args = []
-        name = _snake(desc_text)
-        from keyword import iskeyword
+    existing_but_not_loaded_rule_names_and_gv_names = (
+        existing_rule_names_and_gv_names.difference(loaded_rule_names_and_gv_names)
+    )
+    if existing_but_not_loaded_rule_names_and_gv_names:
+        print("##  existing but not loaded rule grammatic values ##")
+        for rn, gn in existing_but_not_loaded_rule_names_and_gv_names:
+            print("#  ", Rule[rn], "->", GrammaticValue[gn])
+    if unexpected_rules_by_description:
+        print("## add to class Rule ##")
+        for (
+            desc_text,
+            prec_text,
+            assoc,
+            gvs,
+        ) in unexpected_rules_by_description.values():
+            args = []
+            name = _snake(desc_text)
+            from keyword import iskeyword
 
-        if iskeyword(name):
-            name += "_"
-        args.append(repr(desc_text))
-        args.append(prec_text)
-        args.append(
-            "".join(
-                [
-                    "{",
-                    ", ".join(
-                        [".".join([gv.__class__.__name__, gv.name]) for gv in gvs]
-                    ),
-                    ",}",
-                ]
+            if iskeyword(name):
+                name += "_"
+            args.append(repr(desc_text))
+            args.append(prec_text)
+            args.append(
+                "".join(
+                    [
+                        "{",
+                        ", ".join(
+                            [".".join([gv.__class__.__name__, gv.name]) for gv in gvs]
+                        ),
+                        ",}",
+                    ]
+                )
             )
-        )
-        if assoc:
-            args.append(".".join([assoc.__class__.__name__, assoc.name]))
-        print("   ", name, "=", "".join(["(", ", ".join(args), ",)"]))
+            if assoc:
+                args.append(".".join([assoc.__class__.__name__, assoc.name]))
+            print("   ", name, "=", "".join(["(", ", ".join(args), ",)"]))
         ...
 
 
