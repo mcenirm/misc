@@ -687,15 +687,19 @@ class IndentedPrinter:
     def __init__(self, print=print, level=0) -> None:
         self.print = print
         self.level = level
-        self.prefix = " " * self.level
+        self.prefix = "  " * self.level
         self.need_prefix = True
 
     def __call__(self, *args, **kwargs):
-        if self.need_prefix:
+        if kwargs.pop("need_prefix", self.need_prefix):
             args = list(args)
-            args.insert(0, self.prefix)
+            args[0] = self.prefix + str(args[0])
         self.need_prefix = kwargs.get("end") is None
         return self.print(*args, **kwargs)
+
+    def end_line(self) -> None:
+        self.print()
+        self.need_prefix = True
 
 
 class CountingCharacters:
@@ -717,60 +721,69 @@ def indent(stream: CountingCharacters, print=print, level: int = 0) -> None:
     state = ParseState.eating_spaces
     while ch := stream.read(1):
         where = stream.tell() - 1
+        up = False
+        down = False
+        next_state = state
         try:
             if state == ParseState.eating_spaces:
                 while ch.isspace() and (ch := stream.read(1)):
                     ...
                 if ch == ExtraToken.left_parenthesis.value:
-                    ip(ExtraToken.left_parenthesis.value)
-                    indent(stream, print, level + 1)
-                    ip(ExtraToken.right_parenthesis.value)
+                    down = True
                 elif ch == ExtraToken.right_parenthesis.value:
-                    if level:
-                        ip()
-                        return
-                    else:
-                        raise ValueError("unexpected right parenthesis")
+                    up = True
                 elif ch == '"':
-                    ip(ch, end="")
-                    state = ParseState.inside_quotation
+                    next_state = ParseState.inside_quotation
                 elif ch.isprintable():
-                    ip(ch, end="")
+                    next_state = ParseState.inside_expression
                 else:
                     raise ValueError()
             elif state == ParseState.inside_expression:
                 if ch == ExtraToken.left_parenthesis.value:
-                    ip(ExtraToken.left_parenthesis.value)
-                    indent(stream, print, level + 1)
-                    ip(ExtraToken.right_parenthesis.value)
+                    down = True
                 elif ch == ExtraToken.right_parenthesis.value:
-                    if level:
-                        ip()
-                        return
-                    else:
-                        raise ValueError("unexpected right parenthesis")
+                    up = True
                 elif ch.isspace():
-                    ip(" ", end="")
-                    state = ParseState.eating_spaces
+                    ch = " "
+                    next_state = ParseState.eating_spaces
                 elif ch == '"':
-                    ip(ch, end="")
-                    state = ParseState.inside_quotation
+                    next_state = ParseState.inside_quotation
                 elif ch.isprintable():
-                    ip(ch, end="")
+                    ...
                 else:
                     raise ValueError()
             elif state == ParseState.inside_quotation:
                 if ch == '"':
-                    ip(ch, end="")
-                    state = ParseState.eating_spaces
+                    next_state = ParseState.eating_spaces
                 elif ch.isprintable():
-                    ip(ch, end="")
+                    ...
                 else:
                     raise ValueError()
             else:
                 raise ValueError("bad state")
         except ValueError as ve:
-            raise ValueError("indent", *ve.args, ch, where, state) from ve
+            raise ValueError(
+                "indent",
+                *ve.args,
+                ch,
+                where,
+                state.name,
+                next_state.name,
+            ) from ve
+        if up:
+            if level:
+                ip.end_line()
+                return
+            else:
+                raise ValueError("unexpected right parenthesis")
+        if down:
+            ip.end_line()
+            ip(ExtraToken.left_parenthesis.value)
+            indent(stream, print, level + 1)
+            ip(ExtraToken.right_parenthesis.value)
+        else:
+            ip(ch, end="")
+        state = next_state
 
 
 def main() -> None:
