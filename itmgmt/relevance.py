@@ -603,56 +603,184 @@ class TermBuilder:
 
 
 class ParseState(_enum.Enum):
-    expecting_expression = _enum.auto()
-    identifier_or_keyword = _enum.auto()
+    eating_spaces = _enum.auto()
+    inside_expression = _enum.auto()
+    inside_quotation = _enum.auto()
+    # expecting_expression = _enum.auto()
+    # identifier_or_keyword = _enum.auto()
+    # quoted_escape = _enum.auto()
+
+
+class StringishStream:
+    def __init__(self, f: _typing.TextIO) -> None:
+        super().__init__()
+        self.f = f
+        self.b = f.read(1)
+        self.eof = self.b == ""
+
+    def __bool__(self) -> bool:
+        return self.eof
+
+    def peek(self) -> str:
+        if self.eof:
+            return ""
+        if not self.b:
+            b = self.f.read(1)
+
+        return b[0]
 
 
 def parse(f: _typing.TextIO):
     from unicodedata import category
 
+    stream = StringishStream(f)
     stack = []
     state = ParseState.expecting_expression
-    chindex = 0
-    linenum = 1
-    colnum = 1
+    # chindex = 0
+    # linenum = 1
+    # colnum = 1
     builder = None
-    while ch := f.read(1):
-        eof = len(ch) < 1
-        chcat = None if eof else category(ch)
-        match state, eof, chcat, ch:
-            case ParseState.expecting_expression, True, _, _:
-                break
-            case ParseState.expecting_expression, _, _, ExtraToken.left_parenthesis.value:
-                stack.append(dict(chindex=chindex, linenum=linenum, colnum=colnum))
-                state = ParseState.expecting_expression
-            case ParseState.expecting_expression, _, "Ll", _:
-                builder = TermBuilder(ch, chindex, linenum, colnum)
-                state = ParseState.identifier_or_keyword
-            case ParseState.identifier_or_keyword, _, "Ll" | "Zs", _:
-                builder.append(ch, chindex, linenum, colnum)
-                state = ParseState.identifier_or_keyword
-            case ParseState.identifier_or_keyword, _, _, ExtraToken.right_parenthesis.value:
-                term = builder.resolve()
-                builder.append(ch, chindex, linenum, colnum)
-                state = ParseState.identifier_or_keyword
+    while stream:
+        ch = stream.peek()
+        chcat = category(ch)
+        match state, chcat, ch:
             case _:
                 raise ValueError("panic", state, eof, chcat, ch)
-        chindex += len(ch)
+    match state:
+        case _:
+            raise ValueError("eof panic", state)
+
+    # while ch := f.read(1):
+    #     eof = len(ch) < 1
+    #     chcat = None if eof else category(ch)
+    #     match state, eof, chcat, ch:
+    #         case ParseState.expecting_expression, True, _, _:
+    #             break
+    #         case ParseState.expecting_expression, _, _, ExtraToken.left_parenthesis.value:
+    #             stack.append(dict(chindex=chindex, linenum=linenum, colnum=colnum))
+    #             state = ParseState.expecting_expression
+    #         case ParseState.expecting_expression, _, "Ll", _:
+    #             builder = TermBuilder(ch, chindex, linenum, colnum)
+    #             state = ParseState.identifier_or_keyword
+    #         case ParseState.identifier_or_keyword, _, "Ll" | "Zs", _:
+    #             builder.append(ch, chindex, linenum, colnum)
+    #             state = ParseState.identifier_or_keyword
+    #         case ParseState.identifier_or_keyword, _, _, ExtraToken.right_parenthesis.value:
+    #             term = builder.resolve()
+    #             builder.append(ch, chindex, linenum, colnum)
+    #             state = ParseState.identifier_or_keyword
+    #         case _:
+    #             raise ValueError("panic", state, eof, chcat, ch)
+    #     chindex += len(ch)
     if stack:
-        ...
+        ic(stack)
     if builder:
-        ...
+        ic(builder)
 
 
-def run(infile: _typing.TextIO, outfile: _typing.TextIO):
+def run(infile: _typing.TextIO, outfile: _typing.TextIO) -> None:
     for expr in parse(infile):
         print(expr.indent(), file=outfile)
 
 
-def main() -> None:
-    from sys import stdin, stdout
+class IndentedPrinter:
+    def __init__(self, print=print, level=0) -> None:
+        self.print = print
+        self.level = level
+        self.prefix = " " * self.level
+        self.need_prefix = True
 
-    run(infile=stdin, outfile=stdout)
+    def __call__(self, *args, **kwargs):
+        if self.need_prefix:
+            args = list(args)
+            args.insert(0, self.prefix)
+        self.need_prefix = kwargs.get("end") is None
+        return self.print(*args, **kwargs)
+
+
+class CountingCharacters:
+    def __init__(self, f: _typing.TextIO) -> None:
+        self.f = f
+        self.c = 0
+
+    def read(self, n: int, /) -> str:
+        s = self.f.read(n)
+        self.c += len(s)
+        return s
+
+    def tell(self) -> int:
+        return self.c
+
+
+def indent(stream: CountingCharacters, print=print, level: int = 0) -> None:
+    ip = IndentedPrinter(print, level)
+    state = ParseState.eating_spaces
+    while ch := stream.read(1):
+        where = stream.tell() - 1
+        try:
+            if state == ParseState.eating_spaces:
+                while ch.isspace() and (ch := stream.read(1)):
+                    ...
+                if ch == ExtraToken.left_parenthesis.value:
+                    ip(ExtraToken.left_parenthesis.value)
+                    indent(stream, print, level + 1)
+                    ip(ExtraToken.right_parenthesis.value)
+                elif ch == ExtraToken.right_parenthesis.value:
+                    if level:
+                        ip()
+                        return
+                    else:
+                        raise ValueError("unexpected right parenthesis")
+                elif ch == '"':
+                    ip(ch, end="")
+                    state = ParseState.inside_quotation
+                elif ch.isprintable():
+                    ip(ch, end="")
+                else:
+                    raise ValueError()
+            elif state == ParseState.inside_expression:
+                if ch == ExtraToken.left_parenthesis.value:
+                    ip(ExtraToken.left_parenthesis.value)
+                    indent(stream, print, level + 1)
+                    ip(ExtraToken.right_parenthesis.value)
+                elif ch == ExtraToken.right_parenthesis.value:
+                    if level:
+                        ip()
+                        return
+                    else:
+                        raise ValueError("unexpected right parenthesis")
+                elif ch.isspace():
+                    ip(" ", end="")
+                    state = ParseState.eating_spaces
+                elif ch == '"':
+                    ip(ch, end="")
+                    state = ParseState.inside_quotation
+                elif ch.isprintable():
+                    ip(ch, end="")
+                else:
+                    raise ValueError()
+            elif state == ParseState.inside_quotation:
+                if ch == '"':
+                    ip(ch, end="")
+                    state = ParseState.eating_spaces
+                elif ch.isprintable():
+                    ip(ch, end="")
+                else:
+                    raise ValueError()
+            else:
+                raise ValueError("bad state")
+        except ValueError as ve:
+            raise ValueError("indent", *ve.args, ch, where, state) from ve
+
+
+def main() -> None:
+    from sys import argv, stdin, stdout
+
+    args = argv[1:]
+    if args and args[0] == "-i":
+        indent(CountingCharacters(stdin))
+    else:
+        run(infile=stdin, outfile=stdout)
 
 
 def grammar_checklist(
