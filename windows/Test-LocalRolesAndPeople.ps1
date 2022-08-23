@@ -9,7 +9,47 @@ foreach ($d in $PWD, $PSScriptRoot) {
     }
 }
 if ($null -eq $DataPath) {
-    Write-Error "Could not find data file: ${DataFileName}"
+    Write-Warning @"
+The data file '${DataFileName}' should have contents similar to:
+----------
+@{
+    Roles  = @{
+        Regular = @{
+            Groups         = @(
+                'Users'
+                'Project A'
+            )
+            UserNamePrefix = ''
+            FullNameSuffix = ''
+        }
+        Admin   = @{
+            Groups         = @(
+                'Administrators'
+            )
+            UserNamePrefix = 'admin-'
+            FullNameSuffix = ' (admin)'
+        }
+    }
+    People = @{
+        jonesj = @{
+            Roles    = @(
+                'Admin'
+                'Backup'
+            )
+            FullName = 'Jane Jones'
+        }
+        smithj = @{
+            Roles    = @(
+                'Regular'
+                'Audit'
+            )
+            FullName = 'John Smith'
+        }
+    }
+}
+----------
+"@
+    Write-Error "Could not find data file: ${DataFileName}" -ErrorAction Stop
 }
 $Data = Import-PowerShellDataFile -LiteralPath $DataPath
 
@@ -22,6 +62,7 @@ foreach ($Role in $Data.Roles.GetEnumerator()) {
     }
 }
 
+$WrotePasswordCommand = $false
 foreach ($Person in $Data.People.GetEnumerator()) {
     foreach ($RoleName in $Person.Value.Roles) {
         $Role = $Data.Roles[$RoleName]
@@ -29,6 +70,22 @@ foreach ($Person in $Data.People.GetEnumerator()) {
         $FullName = $Person.Value.FullName + $Role.FullNameSuffix
         $ExistingLocalUser = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
         if ($null -eq $ExistingLocalUser) {
+            if (-not $WrotePasswordCommand) {
+                Write-Output @'
+#
+# Use one of the following commands to set the initial password.
+#
+# Manual:
+#
+#  $PasswordSecureString = Read-Host 'Enter password' -AsSecureString
+#
+# Unrecoverable random password:
+#
+#  $PasswordSecureString = [System.Web.Security.Membership]::GeneratePassword(16,4) | ConvertTo-SecureString -AsPlainText -Force
+#
+'@
+                $WrotePasswordCommand = $true
+            }
             Write-Output ''
             Write-Output "New-LocalUser           -Verbose -Name   '${UserName}' -FullName '${FullName}' -Password `$PasswordSecureString"
             foreach ($GroupName in $Role.Groups) {
