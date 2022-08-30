@@ -62,6 +62,11 @@ foreach ($Role in $Data.Roles.GetEnumerator()) {
     }
 }
 
+# TODO Check for any unspecified but existing accounts that:
+#      * start with a role username prefix
+#      * end with a person username
+# TODO Decide if there should be a simple warning vs commands for removal
+
 $WrotePasswordCommand = $false
 foreach ($Person in $Data.People.GetEnumerator()) {
     foreach ($RoleName in $Person.Value.Roles) {
