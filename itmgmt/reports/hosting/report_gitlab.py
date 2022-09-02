@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from csv import DictWriter
 from dataclasses import dataclass
 from itertools import islice
@@ -16,12 +17,16 @@ from gitlab.v4.objects.members import GroupMember, ProjectMember
 from gitlab.v4.objects.projects import Project, ProjectManager
 from icecream import ic
 from rich import inspect as ri
+from sqlalchemy.exc import IntegrityError
 
 __ALL__ = [
     "get_default_gitlab",
     "main",
     "report_gitlab",
 ]
+
+
+_DEBUG = defaultdict(dict)
 
 
 DEFAULT_GITLAB_ID = None
@@ -34,6 +39,10 @@ class TableSpecification:
     attr_key: str
     attrs_ignore: frozenset[str]
     attrs_do_not_normalize: frozenset[str]
+
+    @property
+    def foreign_key_name(self) -> str:
+        return "_".join([self.name, self.attr_key])
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -137,6 +146,21 @@ class DbHelper:
         attrs_do_not_normalize=frozenset(),
     )
 
+    member_table_spec = TableSpecification(
+        name="member",
+        attr_key="id",
+        attrs_ignore=frozenset(
+            {
+                "access_level",
+                "created_at",
+                "expires_at",
+                "group_id",
+                "membership_state",
+            }
+        ),
+        attrs_do_not_normalize=frozenset(),
+    )
+
     list_index_key: str = "_i"
 
     def import_groups(self, manager: GroupManager, /) -> DbHelper:
@@ -167,21 +191,33 @@ class DbHelper:
             yield group_or_project
 
     def import_group(self, group: Group, /) -> DbHelper:
-        self._import_item_with_attributes(
-            item=group,
+        return self._import_group_or_project(
+            group_or_project=group,
             spec=self.group_table_spec,
         )
-        # for member in self._iterate_direct_members(group):
-        #     self._import_direct_member()
-        #     ri(member)
-        #     exit()
-        return self
 
     def import_project(self, project: Project, /) -> DbHelper:
-        self._import_item_with_attributes(
-            item=project,
+        return self._import_group_or_project(
+            group_or_project=project,
             spec=self.project_table_spec,
         )
+
+    def _import_group_or_project(
+        self,
+        *,
+        group_or_project: Group | Project,
+        spec: TableSpecification,
+    ) -> DbHelper:
+        self._import_item_with_attributes(
+            item=group_or_project,
+            spec=spec,
+        )
+        for member in self._iterate_direct_members(group_or_project):
+            self._import_direct_member(
+                member=member,
+                member_of=group_or_project,
+                member_of_spec=spec,
+            )
         return self
 
     def _import_item_with_attributes(
@@ -198,11 +234,16 @@ class DbHelper:
             if dnn_attr in attrs:
                 dnn_value = attrs.pop(dnn_attr)
                 row[dnn_attr] = dnn_value
-        new_key = table.insert(row)
-        assert (
-            item_key == new_key
-        ), f"Unexpected key mismatch for table {spec.name!r}: {item_key!r} != {new_key!r}"
-        property_fk_name = "_".join([spec.name, spec.attr_key])
+        try:
+            new_key = table.insert(row)
+            _DEBUG[spec.name][new_key] = item
+            assert (
+                item_key == new_key
+            ), f"Unexpected key mismatch for table {spec.name!r}: {item_key!r} != {new_key!r}"
+        except IntegrityError as ie:
+            existing = _DEBUG[spec.name][item_key]
+            raise KeyboardInterrupt(existing, item)
+        property_fk_name = spec.foreign_key_name
         for k, v in attrs.items():
             property_table_name = "__".join([spec.name, k])
             property_table: Table = self.db[property_table_name]
@@ -238,6 +279,22 @@ class DbHelper:
         ):
             yield member
 
+    def _import_direct_member(
+        self,
+        member: GroupMember | ProjectMember,
+        member_of: Group | Project,
+        member_of_spec: TableSpecification,
+    ) -> DbHelper:
+        self._import_item_with_attributes(item=member, spec=self.member_table_spec)
+        # member_key = member.attributes[self.member_table_spec.attr_key]
+        # member_table: Table = self.db[self.member_table_spec.name]
+        # member_table.insert_ignore(
+        #     {self.member_table_spec.attr_key: member_key},
+        #     [self.member_table_spec.attr_key],
+        # )
+        # raise KeyboardInterrupt(member)
+        return self
+
 
 def get_default_gitlab(
     *,
@@ -252,8 +309,12 @@ def get_default_gitlab(
 def import_gitlab(gl: Gitlab, /, db_connect_url="sqlite:///:memory:") -> Database:
     db = connect(db_connect_url)
     helper = DbHelper(db=db)
-    helper.import_groups(gl.groups)
-    helper.import_projects(gl.projects)
+    try:
+        helper.import_groups(gl.groups)
+        helper.import_projects(gl.projects)
+    except KeyboardInterrupt as ki:
+        for a in ki.args:
+            ri(a)
     return db
 
 
