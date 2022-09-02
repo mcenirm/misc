@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from csv import DictWriter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import islice
 from pathlib import Path
 from sys import exit, stdout
@@ -11,7 +11,6 @@ from dataset import Database, Table, connect
 from gitlab import Gitlab
 from gitlab.base import RESTObject
 from gitlab.const import AccessLevel
-from gitlab.mixins import ListMixin
 from gitlab.v4.objects.groups import Group, GroupManager
 from gitlab.v4.objects.members import GroupMember, ProjectMember
 from gitlab.v4.objects.projects import Project, ProjectManager
@@ -32,8 +31,101 @@ DEFAULT_GITLAB_CONFIG_FILES = [str(Path("secrets", "gitlab.cfg"))]
 @dataclass(kw_only=True, frozen=True)
 class DbHelper:
     db: Database
+
     GROUP_TABLE_NAME: str = "group"
+    GROUP_ATTR_KEY: str = "id"
+    GROUP_ATTRS_IGNORE: frozenset[str] = frozenset(
+        {
+            "avatar_url",
+            "default_branch_protection",
+            "emails_disabled",
+            "ldap_access",
+            "ldap_cn",
+            "lfs_enabled",
+            "mentions_disabled",
+            "namespace",
+            "request_access_enabled",
+            "require_two_factor_authentication",
+            "share_with_group_lock",
+            "two_factor_grace_period",
+        }
+    )
+    GROUP_ATTRS_DO_NOT_NORMALIZE: frozenset[str] = frozenset()
+
     PROJECT_TABLE_NAME: str = "project"
+    PROJECT_ATTR_KEY: str = "id"
+    PROJECT_ATTRS_IGNORE: frozenset[str] = frozenset(
+        {
+            "_links",
+            "allow_merge_on_skipped_pipeline",
+            "analytics_access_level",
+            "auto_cancel_pending_pipelines",
+            "auto_devops_deploy_strategy",
+            "autoclose_referenced_issues",
+            "avatar_url",
+            "build_timeout",
+            "builds_access_level",
+            "can_create_merge_request_in",
+            "ci_allow_fork_pipelines_to_run_in_parent_project",
+            "ci_config_path",
+            "ci_default_git_depth",
+            "ci_forward_deployment_enabled",
+            "ci_job_token_scope_enabled",
+            "ci_opt_in_jwt",
+            "ci_separated_caches",
+            "container_expiration_policy",
+            "container_registry_access_level",
+            "container_registry_enabled",
+            "enforce_auth_checks_on_uploads",
+            "external_authorization_classification_label",
+            "forking_access_level",
+            "forks_count",
+            "import_status",
+            "issues_access_level",
+            "issues_enabled",
+            "jobs_enabled",
+            "keep_latest_artifact",
+            "lfs_enabled",
+            "merge_commit_template",
+            "merge_method",
+            "merge_requests_access_level",
+            "merge_requests_enabled",
+            "namespace",
+            "only_allow_merge_if_all_discussions_are_resolved",
+            "only_allow_merge_if_pipeline_succeeds",
+            "open_issues_count",
+            "operations_access_level",
+            "packages_enabled",
+            "pages_access_level",
+            "permissions",
+            "printing_merge_request_link_enabled",
+            "public_jobs",
+            "readme_url",
+            "remove_source_branch_after_merge",
+            "repository_access_level",
+            "request_access_enabled",
+            "requirements_access_level",
+            "requirements_enabled",
+            "resolve_outdated_diff_discussions",
+            "restrict_user_defined_variables",
+            "runner_token_expiration_interval",
+            "security_and_compliance_access_level",
+            "security_and_compliance_enabled",
+            "service_desk_enabled",
+            "shared_runners_enabled",
+            "snippets_access_level",
+            "snippets_enabled",
+            "squash_commit_template",
+            "squash_option",
+            "star_count",
+            "suggestion_commit_message",
+            "wiki_access_level",
+            "wiki_enabled",
+        }
+    )
+    PROJECT_ATTRS_DO_NOT_NORMALIZE: frozenset[str] = frozenset()
+
+    LIST_INDEX_KEY: str = "_i"
 
     def import_groups(self, manager: GroupManager, /) -> DbHelper:
         for group in self._iterate_groups_or_projects(manager):
@@ -52,6 +144,7 @@ class DbHelper:
         *,
         min_access_level: AccessLevel = AccessLevel.REPORTER,
     ) -> Generator[Group | Project, None, None]:
+        # TODO remove islice
         for group_or_project in islice(
             manager.list(
                 iterator=True,
@@ -65,23 +158,13 @@ class DbHelper:
         self._import_item_with_attributes(
             table_name=self.GROUP_TABLE_NAME,
             item=group,
-            ignore_attrs={
-                "avatar_url",
-                "default_branch_protection",
-                "emails_disabled",
-                "ldap_access",
-                "ldap_cn",
-                "lfs_enabled",
-                "mentions_disabled",
-                "namespace",
-                "request_access_enabled",
-                "require_two_factor_authentication",
-                "share_with_group_lock",
-                "two_factor_grace_period",
-            },
+            key_attr=self.GROUP_ATTR_KEY,
+            ignore_attrs=self.GROUP_ATTRS_IGNORE,
+            do_not_normalize_attrs=self.GROUP_ATTRS_DO_NOT_NORMALIZE,
+            list_index_key=self.LIST_INDEX_KEY,
         )
-        # for member in group.members.list(iterator=True):
-        #     helper.add_direct_member()
+        # for member in self._iterate_direct_members(group):
+        #     self._import_direct_member()
         #     ri(member)
         #     exit()
         return self
@@ -90,73 +173,10 @@ class DbHelper:
         self._import_item_with_attributes(
             table_name=self.PROJECT_TABLE_NAME,
             item=project,
-            ignore_attrs={
-                "_links",
-                "allow_merge_on_skipped_pipeline",
-                "analytics_access_level",
-                "auto_cancel_pending_pipelines",
-                "auto_devops_deploy_strategy",
-                "autoclose_referenced_issues",
-                "avatar_url",
-                "build_timeout",
-                "builds_access_level",
-                "can_create_merge_request_in",
-                "ci_allow_fork_pipelines_to_run_in_parent_project",
-                "ci_config_path",
-                "ci_default_git_depth",
-                "ci_forward_deployment_enabled",
-                "ci_job_token_scope_enabled",
-                "ci_opt_in_jwt",
-                "ci_separated_caches",
-                "container_expiration_policy",
-                "container_registry_access_level",
-                "container_registry_enabled",
-                "enforce_auth_checks_on_uploads",
-                "external_authorization_classification_label",
-                "forking_access_level",
-                "forks_count",
-                "import_status",
-                "issues_access_level",
-                "issues_enabled",
-                "jobs_enabled",
-                "keep_latest_artifact",
-                "lfs_enabled",
-                "merge_commit_template",
-                "merge_method",
-                "merge_requests_access_level",
-                "merge_requests_enabled",
-                "namespace",
-                "only_allow_merge_if_all_discussions_are_resolved",
-                "only_allow_merge_if_pipeline_succeeds",
-                "open_issues_count",
-                "operations_access_level",
-                "packages_enabled",
-                "pages_access_level",
-                "permissions",
-                "printing_merge_request_link_enabled",
-                "public_jobs",
-                "readme_url",
-                "remove_source_branch_after_merge",
-                "repository_access_level",
-                "request_access_enabled",
-                "requirements_access_level",
-                "requirements_enabled",
-                "resolve_outdated_diff_discussions",
-                "restrict_user_defined_variables",
-                "runner_token_expiration_interval",
-                "security_and_compliance_access_level",
-                "security_and_compliance_enabled",
-                "service_desk_enabled",
-                "shared_runners_enabled",
-                "snippets_access_level",
-                "snippets_enabled",
-                "squash_commit_template",
-                "squash_option",
-                "star_count",
-                "suggestion_commit_message",
-                "wiki_access_level",
-                "wiki_enabled",
-            },
+            key_attr=self.PROJECT_ATTR_KEY,
+            ignore_attrs=self.PROJECT_ATTRS_IGNORE,
+            do_not_normalize_attrs=self.PROJECT_ATTRS_DO_NOT_NORMALIZE,
+            list_index_key=self.LIST_INDEX_KEY,
         )
         return self
 
@@ -165,10 +185,10 @@ class DbHelper:
         *,
         table_name: str,
         item: RESTObject,
-        key_attr: str = "id",
-        ignore_attrs: set[str] = set(),
-        do_not_normalize_attrs: set[str] = set(),
-        list_index_key: str = "_i",
+        key_attr: str,
+        ignore_attrs: set[str],
+        do_not_normalize_attrs: set[str],
+        list_index_key: str,
     ) -> DbHelper:
         table: Table = self.db[table_name]
         attrs = {k: v for k, v in item.attributes.items() if k not in ignore_attrs}
@@ -205,6 +225,18 @@ class DbHelper:
                     ic("unhandled", table_name, k, type(v))
                     exit()
         return self
+
+    def _iterate_direct_members(
+        self,
+        group_or_project: Group | Project,
+        /,
+    ) -> Generator[GroupMember | ProjectMember, None, None]:
+        # TODO remove islice
+        for member in islice(
+            group_or_project.members.list(iterator=True),
+            3,
+        ):
+            yield member
 
 
 def get_default_gitlab(
