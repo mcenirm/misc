@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from csv import DictWriter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
 from sys import exit, stdout
@@ -29,103 +29,115 @@ DEFAULT_GITLAB_CONFIG_FILES = [str(Path("secrets", "gitlab.cfg"))]
 
 
 @dataclass(kw_only=True, frozen=True)
+class TableSpecification:
+    name: str
+    attr_key: str
+    attrs_ignore: frozenset[str]
+    attrs_do_not_normalize: frozenset[str]
+
+
+@dataclass(kw_only=True, frozen=True)
 class DbHelper:
     db: Database
 
-    GROUP_TABLE_NAME: str = "group"
-    GROUP_ATTR_KEY: str = "id"
-    GROUP_ATTRS_IGNORE: frozenset[str] = frozenset(
-        {
-            "avatar_url",
-            "default_branch_protection",
-            "emails_disabled",
-            "ldap_access",
-            "ldap_cn",
-            "lfs_enabled",
-            "mentions_disabled",
-            "namespace",
-            "request_access_enabled",
-            "require_two_factor_authentication",
-            "share_with_group_lock",
-            "two_factor_grace_period",
-        }
+    group_table_spec: TableSpecification = TableSpecification(
+        name="group",
+        attr_key="id",
+        attrs_ignore=frozenset(
+            {
+                "avatar_url",
+                "default_branch_protection",
+                "emails_disabled",
+                "ldap_access",
+                "ldap_cn",
+                "lfs_enabled",
+                "mentions_disabled",
+                "namespace",
+                "request_access_enabled",
+                "require_two_factor_authentication",
+                "share_with_group_lock",
+                "two_factor_grace_period",
+            }
+        ),
+        attrs_do_not_normalize=frozenset(),
     )
-    GROUP_ATTRS_DO_NOT_NORMALIZE: frozenset[str] = frozenset()
 
-    PROJECT_TABLE_NAME: str = "project"
-    PROJECT_ATTR_KEY: str = "id"
-    PROJECT_ATTRS_IGNORE: frozenset[str] = frozenset(
-        {
-            "_links",
-            "allow_merge_on_skipped_pipeline",
-            "analytics_access_level",
-            "auto_cancel_pending_pipelines",
-            "auto_devops_deploy_strategy",
-            "autoclose_referenced_issues",
-            "avatar_url",
-            "build_timeout",
-            "builds_access_level",
-            "can_create_merge_request_in",
-            "ci_allow_fork_pipelines_to_run_in_parent_project",
-            "ci_config_path",
-            "ci_default_git_depth",
-            "ci_forward_deployment_enabled",
-            "ci_job_token_scope_enabled",
-            "ci_opt_in_jwt",
-            "ci_separated_caches",
-            "container_expiration_policy",
-            "container_registry_access_level",
-            "container_registry_enabled",
-            "enforce_auth_checks_on_uploads",
-            "external_authorization_classification_label",
-            "forking_access_level",
-            "forks_count",
-            "import_status",
-            "issues_access_level",
-            "issues_enabled",
-            "jobs_enabled",
-            "keep_latest_artifact",
-            "lfs_enabled",
-            "merge_commit_template",
-            "merge_method",
-            "merge_requests_access_level",
-            "merge_requests_enabled",
-            "namespace",
-            "only_allow_merge_if_all_discussions_are_resolved",
-            "only_allow_merge_if_pipeline_succeeds",
-            "open_issues_count",
-            "operations_access_level",
-            "packages_enabled",
-            "pages_access_level",
-            "permissions",
-            "printing_merge_request_link_enabled",
-            "public_jobs",
-            "readme_url",
-            "remove_source_branch_after_merge",
-            "repository_access_level",
-            "request_access_enabled",
-            "requirements_access_level",
-            "requirements_enabled",
-            "resolve_outdated_diff_discussions",
-            "restrict_user_defined_variables",
-            "runner_token_expiration_interval",
-            "security_and_compliance_access_level",
-            "security_and_compliance_enabled",
-            "service_desk_enabled",
-            "shared_runners_enabled",
-            "snippets_access_level",
-            "snippets_enabled",
-            "squash_commit_template",
-            "squash_option",
-            "star_count",
-            "suggestion_commit_message",
-            "wiki_access_level",
-            "wiki_enabled",
-        }
+    project_table_spec: TableSpecification = TableSpecification(
+        name="project",
+        attr_key="id",
+        attrs_ignore=frozenset(
+            {
+                "_links",
+                "allow_merge_on_skipped_pipeline",
+                "analytics_access_level",
+                "auto_cancel_pending_pipelines",
+                "auto_devops_deploy_strategy",
+                "autoclose_referenced_issues",
+                "avatar_url",
+                "build_timeout",
+                "builds_access_level",
+                "can_create_merge_request_in",
+                "ci_allow_fork_pipelines_to_run_in_parent_project",
+                "ci_config_path",
+                "ci_default_git_depth",
+                "ci_forward_deployment_enabled",
+                "ci_job_token_scope_enabled",
+                "ci_opt_in_jwt",
+                "ci_separated_caches",
+                "container_expiration_policy",
+                "container_registry_access_level",
+                "container_registry_enabled",
+                "enforce_auth_checks_on_uploads",
+                "external_authorization_classification_label",
+                "forking_access_level",
+                "forks_count",
+                "import_status",
+                "issues_access_level",
+                "issues_enabled",
+                "jobs_enabled",
+                "keep_latest_artifact",
+                "lfs_enabled",
+                "merge_commit_template",
+                "merge_method",
+                "merge_requests_access_level",
+                "merge_requests_enabled",
+                "namespace",
+                "only_allow_merge_if_all_discussions_are_resolved",
+                "only_allow_merge_if_pipeline_succeeds",
+                "open_issues_count",
+                "operations_access_level",
+                "packages_enabled",
+                "pages_access_level",
+                "permissions",
+                "printing_merge_request_link_enabled",
+                "public_jobs",
+                "readme_url",
+                "remove_source_branch_after_merge",
+                "repository_access_level",
+                "request_access_enabled",
+                "requirements_access_level",
+                "requirements_enabled",
+                "resolve_outdated_diff_discussions",
+                "restrict_user_defined_variables",
+                "runner_token_expiration_interval",
+                "security_and_compliance_access_level",
+                "security_and_compliance_enabled",
+                "service_desk_enabled",
+                "shared_runners_enabled",
+                "snippets_access_level",
+                "snippets_enabled",
+                "squash_commit_template",
+                "squash_option",
+                "star_count",
+                "suggestion_commit_message",
+                "wiki_access_level",
+                "wiki_enabled",
+            }
+        ),
+        attrs_do_not_normalize=frozenset(),
     )
-    PROJECT_ATTRS_DO_NOT_NORMALIZE: frozenset[str] = frozenset()
 
-    LIST_INDEX_KEY: str = "_i"
+    list_index_key: str = "_i"
 
     def import_groups(self, manager: GroupManager, /) -> DbHelper:
         for group in self._iterate_groups_or_projects(manager):
@@ -156,12 +168,8 @@ class DbHelper:
 
     def import_group(self, group: Group, /) -> DbHelper:
         self._import_item_with_attributes(
-            table_name=self.GROUP_TABLE_NAME,
             item=group,
-            key_attr=self.GROUP_ATTR_KEY,
-            ignore_attrs=self.GROUP_ATTRS_IGNORE,
-            do_not_normalize_attrs=self.GROUP_ATTRS_DO_NOT_NORMALIZE,
-            list_index_key=self.LIST_INDEX_KEY,
+            spec=self.group_table_spec,
         )
         # for member in self._iterate_direct_members(group):
         #     self._import_direct_member()
@@ -171,40 +179,32 @@ class DbHelper:
 
     def import_project(self, project: Project, /) -> DbHelper:
         self._import_item_with_attributes(
-            table_name=self.PROJECT_TABLE_NAME,
             item=project,
-            key_attr=self.PROJECT_ATTR_KEY,
-            ignore_attrs=self.PROJECT_ATTRS_IGNORE,
-            do_not_normalize_attrs=self.PROJECT_ATTRS_DO_NOT_NORMALIZE,
-            list_index_key=self.LIST_INDEX_KEY,
+            spec=self.project_table_spec,
         )
         return self
 
     def _import_item_with_attributes(
         self,
         *,
-        table_name: str,
         item: RESTObject,
-        key_attr: str,
-        ignore_attrs: set[str],
-        do_not_normalize_attrs: set[str],
-        list_index_key: str,
+        spec: TableSpecification,
     ) -> DbHelper:
-        table: Table = self.db[table_name]
-        attrs = {k: v for k, v in item.attributes.items() if k not in ignore_attrs}
-        item_key = attrs.pop(key_attr)
-        row = {key_attr: item_key}
-        for dnn_attr in do_not_normalize_attrs:
+        table: Table = self.db[spec.name]
+        attrs = {k: v for k, v in item.attributes.items() if k not in spec.attrs_ignore}
+        item_key = attrs.pop(spec.attr_key)
+        row = {spec.attr_key: item_key}
+        for dnn_attr in spec.attrs_do_not_normalize:
             if dnn_attr in attrs:
                 dnn_value = attrs.pop(dnn_attr)
                 row[dnn_attr] = dnn_value
         new_key = table.insert(row)
         assert (
             item_key == new_key
-        ), f"Unexpected key mismatch for table {table_name!r}: {item_key!r} != {new_key!r}"
-        property_fk_name = "_".join([table_name, key_attr])
+        ), f"Unexpected key mismatch for table {spec.name!r}: {item_key!r} != {new_key!r}"
+        property_fk_name = "_".join([spec.name, spec.attr_key])
         for k, v in attrs.items():
-            property_table_name = "__".join([table_name, k])
+            property_table_name = "__".join([spec.name, k])
             property_table: Table = self.db[property_table_name]
             match k, v:
                 case _, str() | bool() | int() | None:
@@ -212,17 +212,17 @@ class DbHelper:
                     property_table.upsert(property_row, [property_fk_name])
                 case _, list():
                     property_rows = [
-                        {property_fk_name: item_key, list_index_key: i, k: v}
+                        {property_fk_name: item_key, self.list_index_key: i, k: v}
                         for i, x in enumerate(v)
                     ]
                     property_table.upsert_many(
-                        property_rows, [property_fk_name, list_index_key]
+                        property_rows, [property_fk_name, self.list_index_key]
                     )
                 case _, dict():
-                    ic("dict", table_name, k, v)
+                    ic("dict", spec.name, k, v)
                     exit()
                 case _:
-                    ic("unhandled", table_name, k, type(v))
+                    ic("unhandled", spec.name, k, type(v))
                     exit()
         return self
 
