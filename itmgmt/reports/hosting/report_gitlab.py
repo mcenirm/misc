@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from csv import DictWriter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import islice
 from pathlib import Path
 from sys import exit, stdout
-from typing import Generator
+from typing import Any, Generator
 
 from dataset import Database, Table, connect
 from gitlab import Gitlab
@@ -18,6 +18,7 @@ from gitlab.v4.objects.projects import Project, ProjectManager
 from icecream import ic
 from rich import inspect as ri
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.types import Integer, TypeEngine
 
 __ALL__ = [
     "get_default_gitlab",
@@ -29,6 +30,13 @@ __ALL__ = [
 _DEBUG = defaultdict(dict)
 
 
+MemberT = GroupMember | ProjectMember
+ClubT = Group | Project
+ClubManagerT = GroupManager | ProjectManager
+MemberKeyT = Any
+MemberDataT = dict[str, Any]
+
+
 DEFAULT_GITLAB_ID = None
 DEFAULT_GITLAB_CONFIG_FILES = [str(Path("secrets", "gitlab.cfg"))]
 
@@ -36,22 +44,25 @@ DEFAULT_GITLAB_CONFIG_FILES = [str(Path("secrets", "gitlab.cfg"))]
 @dataclass(kw_only=True, frozen=True)
 class TableSpecification:
     name: str
-    attr_key: str
+    key_name: str
+    key_type: TypeEngine
     attrs_ignore: frozenset[str]
     attrs_do_not_normalize: frozenset[str]
 
     @property
     def foreign_key_name(self) -> str:
-        return "_".join([self.name, self.attr_key])
+        return "_".join([self.name, self.key_name])
 
 
 @dataclass(kw_only=True, frozen=True)
 class DbHelper:
     db: Database
+    members: dict[MemberKeyT, MemberDataT] = field(default_factory=dict)
 
     group_table_spec: TableSpecification = TableSpecification(
         name="group",
-        attr_key="id",
+        key_name="id",
+        key_type=Integer,
         attrs_ignore=frozenset(
             {
                 "avatar_url",
@@ -68,12 +79,27 @@ class DbHelper:
                 "two_factor_grace_period",
             }
         ),
-        attrs_do_not_normalize=frozenset(),
+        attrs_do_not_normalize=frozenset(
+            {
+                "created_at",
+                "description",
+                "full_name",
+                "full_path",
+                "name",
+                # "parent_id",
+                "path",
+                "project_creation_level",
+                "subgroup_creation_level",
+                "visibility",
+                "web_url",
+            }
+        ),
     )
 
     project_table_spec: TableSpecification = TableSpecification(
         name="project",
-        attr_key="id",
+        key_name="id",
+        key_type=Integer,
         attrs_ignore=frozenset(
             {
                 "_links",
@@ -143,82 +169,166 @@ class DbHelper:
                 "wiki_enabled",
             }
         ),
-        attrs_do_not_normalize=frozenset(),
+        attrs_do_not_normalize=frozenset(
+            {
+                "archived",
+                "auto_devops_enabled",
+                "container_registry_image_prefix",
+                "created_at",
+                "creator_id",
+                "default_branch",
+                "description",
+                "empty_repo",
+                "http_url_to_repo",
+                "last_activity_at",
+                "name",
+                "name_with_namespace",
+                "path",
+                "path_with_namespace",
+                "service_desk_address",
+                "ssh_url_to_repo",
+                "visibility",
+                "web_url",
+            }
+        ),
     )
 
     member_table_spec = TableSpecification(
         name="member",
-        attr_key="id",
+        key_name="id",
+        key_type=Integer,
         attrs_ignore=frozenset(
             {
                 "access_level",
                 "created_at",
+                "created_by",
                 "expires_at",
                 "group_id",
                 "membership_state",
             }
         ),
-        attrs_do_not_normalize=frozenset(),
+        attrs_do_not_normalize=frozenset(
+            {
+                "avatar_url",
+                "name",
+                "state",
+                "username",
+                "web_url",
+            }
+        ),
     )
 
     list_index_key: str = "_i"
 
+    def has_member_data(
+        self,
+        member_key: MemberKeyT,
+        /,
+    ) -> bool:
+        return member_key in self.members
+
+    def get_member_data(
+        self,
+        member_key: MemberKeyT,
+        /,
+    ) -> MemberDataT:
+        return self.members.get(member_key)
+
+    def set_member_data(
+        self,
+        member_key: MemberKeyT,
+        member_data: MemberDataT,
+        /,
+    ) -> None:
+        self.members[member_key] = member_data
+
     def import_groups(self, manager: GroupManager, /) -> DbHelper:
-        for group in self._iterate_groups_or_projects(manager):
+        for group in self._iterate_clubs(manager):
             self.import_group(group)
         return self
 
     def import_projects(self, manager: ProjectManager, /) -> DbHelper:
-        for project in self._iterate_groups_or_projects(manager):
+        for project in self._iterate_clubs(manager):
             self.import_project(project)
         return self
 
-    def _iterate_groups_or_projects(
+    def get_property_table(
         self,
-        manager: GroupManager | ProjectManager,
+        entity_spec: TableSpecification,
+        property_name: str,
+        /,
+        *,
+        entity_fk_is_primary_key: bool = True,
+    ) -> Table:
+        property_table_name = "__".join([entity_spec.name, property_name])
+        table_needs_init = property_table_name not in self.db
+        if table_needs_init:
+            table_init_kwargs = (
+                dict(
+                    primary_id=entity_spec.foreign_key_name,
+                    primary_type=entity_spec.key_type,
+                    primary_increment=None,
+                )
+                if entity_fk_is_primary_key
+                else {}
+            )
+            property_table = self.db.create_table(
+                property_table_name,
+                **table_init_kwargs,
+            )
+        else:
+            property_table: Table = self.db[property_table_name]
+        return property_table
+
+    def _iterate_clubs(
+        self,
+        manager: ClubManagerT,
         /,
         *,
         min_access_level: AccessLevel = AccessLevel.REPORTER,
-    ) -> Generator[Group | Project, None, None]:
+    ) -> Generator[ClubT, None, None]:
         # TODO remove islice
-        for group_or_project in islice(
+        for club in islice(
             manager.list(
                 iterator=True,
                 min_access_level=int(min_access_level),
             ),
             5,
         ):
-            yield group_or_project
+            yield club
 
     def import_group(self, group: Group, /) -> DbHelper:
-        return self._import_group_or_project(
-            group_or_project=group,
-            spec=self.group_table_spec,
+        return self._import_club(
+            club=group,
+            club_spec=self.group_table_spec,
         )
 
     def import_project(self, project: Project, /) -> DbHelper:
-        return self._import_group_or_project(
-            group_or_project=project,
-            spec=self.project_table_spec,
+        return self._import_club(
+            club=project,
+            club_spec=self.project_table_spec,
         )
 
-    def _import_group_or_project(
+    def _import_club(
         self,
         *,
-        group_or_project: Group | Project,
-        spec: TableSpecification,
+        club: ClubT,
+        club_spec: TableSpecification,
     ) -> DbHelper:
         self._import_item_with_attributes(
-            item=group_or_project,
-            spec=spec,
+            item=club,
+            spec=club_spec,
         )
-        for member in self._iterate_direct_members(group_or_project):
+        for member in self._iterate_direct_members(club):
             self._import_direct_member(
                 member=member,
-                member_of=group_or_project,
-                member_of_spec=spec,
+                club=club,
+                club_spec=club_spec,
             )
         return self
+
+    def _member_key(self, member: MemberT, /) -> str:
+        return member.attributes[self.member_table_spec.key_name]
 
     def _import_item_with_attributes(
         self,
@@ -228,8 +338,8 @@ class DbHelper:
     ) -> DbHelper:
         table: Table = self.db[spec.name]
         attrs = {k: v for k, v in item.attributes.items() if k not in spec.attrs_ignore}
-        item_key = attrs.pop(spec.attr_key)
-        row = {spec.attr_key: item_key}
+        item_key = attrs.pop(spec.key_name)
+        row = {spec.key_name: item_key}
         for dnn_attr in spec.attrs_do_not_normalize:
             if dnn_attr in attrs:
                 dnn_value = attrs.pop(dnn_attr)
@@ -242,13 +352,15 @@ class DbHelper:
             ), f"Unexpected key mismatch for table {spec.name!r}: {item_key!r} != {new_key!r}"
         except IntegrityError as ie:
             existing = _DEBUG[spec.name][item_key]
-            raise KeyboardInterrupt(existing, item)
+            raise KeyboardInterrupt(existing, item) from ie
         property_fk_name = spec.foreign_key_name
         for k, v in attrs.items():
-            property_table_name = "__".join([spec.name, k])
-            property_table: Table = self.db[property_table_name]
+            property_table = self.get_property_table(spec, k)
             match k, v:
-                case _, str() | bool() | int() | None:
+                case _, None:
+                    # avoid(?) normalized nulls
+                    ...
+                case _, str() | bool() | int():
                     property_row = {property_fk_name: item_key, k: v}
                     property_table.upsert(property_row, [property_fk_name])
                 case _, list():
@@ -260,40 +372,68 @@ class DbHelper:
                         property_rows, [property_fk_name, self.list_index_key]
                     )
                 case _, dict():
-                    ic("dict", spec.name, k, v)
+                    ic("dict", spec.name, item_key, k, v)
                     exit()
                 case _:
-                    ic("unhandled", spec.name, k, type(v))
+                    ic("unhandled", spec.name, item_key, k, type(v))
                     exit()
         return self
 
     def _iterate_direct_members(
         self,
-        group_or_project: Group | Project,
+        club: ClubT,
         /,
-    ) -> Generator[GroupMember | ProjectMember, None, None]:
+    ) -> Generator[MemberT, None, None]:
         # TODO remove islice
         for member in islice(
-            group_or_project.members.list(iterator=True),
+            club.members.list(iterator=True),
             3,
         ):
             yield member
 
     def _import_direct_member(
         self,
-        member: GroupMember | ProjectMember,
-        member_of: Group | Project,
-        member_of_spec: TableSpecification,
+        member: MemberT,
+        club: ClubT,
+        club_spec: TableSpecification,
     ) -> DbHelper:
-        self._import_item_with_attributes(item=member, spec=self.member_table_spec)
-        # member_key = member.attributes[self.member_table_spec.attr_key]
-        # member_table: Table = self.db[self.member_table_spec.name]
-        # member_table.insert_ignore(
-        #     {self.member_table_spec.attr_key: member_key},
-        #     [self.member_table_spec.attr_key],
-        # )
-        # raise KeyboardInterrupt(member)
+        member_key = self._member_key(member)
+        member_data = self._member_as_member_data(member)
+        if self.has_member_data(member_key):
+            existing_member_data = self.get_member_data(member_key)
+            assert (
+                existing_member_data == member_data
+            ), f"Unexpected member mismatch: {existing_member_data} != {member_data}"
+        else:
+            self.set_member_data(member_key, member_data)
+            self._import_item_with_attributes(item=member, spec=self.member_table_spec)
+        table: Table = self.db[
+            "__".join(
+                [
+                    club_spec.name,
+                    self.member_table_spec.name,
+                ]
+            )
+        ]
+        club_key = club.attributes[club_spec.key_name]
+        table.insert(
+            {
+                club_spec.foreign_key_name: club_key,
+                self.member_table_spec.foreign_key_name: member_key,
+            },
+            [
+                club_spec.foreign_key_name,
+                self.member_table_spec.foreign_key_name,
+            ],
+        )
         return self
+
+    def _member_as_member_data(self, member: MemberT, /) -> MemberDataT:
+        return {
+            k: v
+            for k, v in member.attributes.items()
+            if k not in self.member_table_spec.attrs_ignore
+        }
 
 
 def get_default_gitlab(
