@@ -437,6 +437,9 @@ class DbHelper:
             club_spec.name_when_used_as_foreign_key: club_key,
             self.member_table_spec.name_when_used_as_foreign_key: prep.key,
         }
+        for k, v in prep.extra.items():
+            if k not in self.club_member_spec.attrs_ignore:
+                row[k] = v
         table.insert(
             row,
             [
