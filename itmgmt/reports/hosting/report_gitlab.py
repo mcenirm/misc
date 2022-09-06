@@ -10,7 +10,6 @@ from typing import Any, Generator
 
 from dataset import Database, Table, connect
 from gitlab import Gitlab
-from gitlab.base import RESTObject
 from gitlab.const import AccessLevel
 from gitlab.v4.objects.groups import Group, GroupManager
 from gitlab.v4.objects.members import GroupMember, ProjectMember
@@ -27,18 +26,21 @@ __ALL__ = [
 ]
 
 
-_DEBUG = defaultdict(dict)
-
-
-MemberT = GroupMember | ProjectMember
-ClubT = Group | Project
-ClubManagerT = GroupManager | ProjectManager
-MemberKeyT = Any
-MemberDataT = dict[str, Any]
-
-
 DEFAULT_GITLAB_ID = None
 DEFAULT_GITLAB_CONFIG_FILES = [str(Path("secrets", "gitlab.cfg"))]
+
+
+ClubT = Group | Project
+ClubManagerT = GroupManager | ProjectManager
+ClubKeyT = Integer
+
+MemberT = GroupMember | ProjectMember
+MemberKeyT = Integer
+
+ItemWithAttributesT = ClubT | MemberT
+ItemWithAttributesKeyT = ClubKeyT | MemberKeyT
+ItemWithAttributesDataT = dict[str, Any]
+MemberDataT = ItemWithAttributesDataT
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -50,8 +52,52 @@ class TableSpecification:
     attrs_do_not_normalize: frozenset[str]
 
     @property
-    def foreign_key_name(self) -> str:
+    def name_when_used_as_foreign_key(self) -> str:
         return "_".join([self.name, self.key_name])
+
+
+@dataclass(kw_only=True, frozen=True)
+class PreparedItemWithAttributes:
+    key: ItemWithAttributesKeyT
+    attributes: ItemWithAttributesDataT
+    normalize_attributes: ItemWithAttributesDataT
+    extra: ItemWithAttributesDataT
+
+    @classmethod
+    def prepare_from_item_and_spec(
+        cls,
+        *,
+        item: ItemWithAttributesT,
+        spec: TableSpecification,
+    ) -> PreparedItemWithAttributes:
+        found_key = False
+        key: ItemWithAttributesKeyT = None
+        attributes: ItemWithAttributesDataT = {}
+        normalize_attributes: ItemWithAttributesDataT = {}
+        extra: ItemWithAttributesDataT = {}
+        for k, v in item.attributes.items():
+            if v is None:
+                # TODO verify that omitting nulls is a good thing
+                continue
+            elif k == spec.key_name:
+                found_key = True
+                key = v
+            elif k in spec.attrs_ignore:
+                extra[k] = v
+            elif k in spec.attrs_do_not_normalize:
+                attributes[k] = v
+            else:
+                normalize_attributes[k] = v
+        assert (
+            found_key
+        ), f"Expected to find key {spec.key_name!r} in {item!r} for {spec!r}"
+        result = cls(
+            key=key,
+            attributes=attributes,
+            normalize_attributes=normalize_attributes,
+            extra=extra,
+        )
+        return result
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -62,7 +108,7 @@ class DbHelper:
     group_table_spec: TableSpecification = TableSpecification(
         name="group",
         key_name="id",
-        key_type=Integer,
+        key_type=ClubKeyT,
         attrs_ignore=frozenset(
             {
                 "avatar_url",
@@ -99,7 +145,7 @@ class DbHelper:
     project_table_spec: TableSpecification = TableSpecification(
         name="project",
         key_name="id",
-        key_type=Integer,
+        key_type=ClubKeyT,
         attrs_ignore=frozenset(
             {
                 "_links",
@@ -196,7 +242,7 @@ class DbHelper:
     member_table_spec = TableSpecification(
         name="member",
         key_name="id",
-        key_type=Integer,
+        key_type=MemberKeyT,
         attrs_ignore=frozenset(
             {
                 "access_level",
@@ -218,7 +264,19 @@ class DbHelper:
         ),
     )
 
+    club_member_spec = TableSpecification(
+        name="",
+        key_name="",
+        key_type=Any,
+        attrs_ignore=frozenset(),
+        attrs_do_not_normalize=frozenset(),
+    )
+
     list_index_key: str = "_i"
+
+    debug: defaultdict[str, dict[ItemWithAttributesKeyT, ItemWithAttributesT]] = field(
+        default_factory=lambda: defaultdict(dict)
+    )
 
     def has_member_data(
         self,
@@ -265,7 +323,7 @@ class DbHelper:
         if table_needs_init:
             table_init_kwargs = (
                 dict(
-                    primary_id=entity_spec.foreign_key_name,
+                    primary_id=entity_spec.name_when_used_as_foreign_key,
                     primary_type=entity_spec.key_type,
                     primary_increment=None,
                 )
@@ -319,67 +377,35 @@ class DbHelper:
             item=club,
             spec=club_spec,
         )
-        for member in self._iterate_direct_members(club):
-            self._import_direct_member(
+        for member in self._iterate_direct_members_of_club(club):
+            self._import_direct_member_of_club(
                 member=member,
                 club=club,
                 club_spec=club_spec,
             )
         return self
 
-    def _member_key(self, member: MemberT, /) -> str:
-        return member.attributes[self.member_table_spec.key_name]
-
-    def _import_item_with_attributes(
+    def _member_key(
         self,
-        *,
-        item: RESTObject,
-        spec: TableSpecification,
-    ) -> DbHelper:
-        table: Table = self.db[spec.name]
-        attrs = {k: v for k, v in item.attributes.items() if k not in spec.attrs_ignore}
-        item_key = attrs.pop(spec.key_name)
-        row = {spec.key_name: item_key}
-        for dnn_attr in spec.attrs_do_not_normalize:
-            if dnn_attr in attrs:
-                dnn_value = attrs.pop(dnn_attr)
-                row[dnn_attr] = dnn_value
-        try:
-            new_key = table.insert(row)
-            _DEBUG[spec.name][new_key] = item
-            assert (
-                item_key == new_key
-            ), f"Unexpected key mismatch for table {spec.name!r}: {item_key!r} != {new_key!r}"
-        except IntegrityError as ie:
-            existing = _DEBUG[spec.name][item_key]
-            raise KeyboardInterrupt(existing, item) from ie
-        property_fk_name = spec.foreign_key_name
-        for k, v in attrs.items():
-            property_table = self.get_property_table(spec, k)
-            match k, v:
-                case _, None:
-                    # avoid(?) normalized nulls
-                    ...
-                case _, str() | bool() | int():
-                    property_row = {property_fk_name: item_key, k: v}
-                    property_table.upsert(property_row, [property_fk_name])
-                case _, list():
-                    property_rows = [
-                        {property_fk_name: item_key, self.list_index_key: i, k: v}
-                        for i, x in enumerate(v)
-                    ]
-                    property_table.upsert_many(
-                        property_rows, [property_fk_name, self.list_index_key]
-                    )
-                case _, dict():
-                    ic("dict", spec.name, item_key, k, v)
-                    exit()
-                case _:
-                    ic("unhandled", spec.name, item_key, k, type(v))
-                    exit()
-        return self
+        member: MemberT,
+        /,
+    ) -> MemberKeyT:
+        k: MemberKeyT = self._item_with_attributes_key(
+            member.attributes,
+            self.member_table_spec,
+        )
+        return k
 
-    def _iterate_direct_members(
+    def _item_with_attributes_key(
+        self,
+        item: ItemWithAttributesT,
+        spec: TableSpecification,
+        /,
+    ) -> ItemWithAttributesKeyT:
+        k: ItemWithAttributesKeyT = item.attributes[spec.key_name]
+        return k
+
+    def _iterate_direct_members_of_club(
         self,
         club: ClubT,
         /,
@@ -391,22 +417,13 @@ class DbHelper:
         ):
             yield member
 
-    def _import_direct_member(
+    def _import_direct_member_of_club(
         self,
         member: MemberT,
         club: ClubT,
         club_spec: TableSpecification,
     ) -> DbHelper:
-        member_key = self._member_key(member)
-        member_data = self._member_as_member_data(member)
-        if self.has_member_data(member_key):
-            existing_member_data = self.get_member_data(member_key)
-            assert (
-                existing_member_data == member_data
-            ), f"Unexpected member mismatch: {existing_member_data} != {member_data}"
-        else:
-            self.set_member_data(member_key, member_data)
-            self._import_item_with_attributes(item=member, spec=self.member_table_spec)
+        prep = self._import_member(member)
         table: Table = self.db[
             "__".join(
                 [
@@ -416,24 +433,105 @@ class DbHelper:
             )
         ]
         club_key = club.attributes[club_spec.key_name]
+        row = {
+            club_spec.name_when_used_as_foreign_key: club_key,
+            self.member_table_spec.name_when_used_as_foreign_key: prep.key,
+        }
         table.insert(
-            {
-                club_spec.foreign_key_name: club_key,
-                self.member_table_spec.foreign_key_name: member_key,
-            },
+            row,
             [
-                club_spec.foreign_key_name,
-                self.member_table_spec.foreign_key_name,
+                club_spec.name_when_used_as_foreign_key,
+                self.member_table_spec.name_when_used_as_foreign_key,
             ],
         )
         return self
 
-    def _member_as_member_data(self, member: MemberT, /) -> MemberDataT:
-        return {
-            k: v
-            for k, v in member.attributes.items()
-            if k not in self.member_table_spec.attrs_ignore
-        }
+    def _import_member(
+        self,
+        member: MemberT,
+        /,
+    ) -> PreparedItemWithAttributes:
+        expected: PreparedItemWithAttributes = (
+            PreparedItemWithAttributes.prepare_from_item_and_spec(
+                item=member,
+                spec=self.member_table_spec,
+            )
+        )
+        if self.has_member_data(expected.key):
+            existing = self.get_member_data(expected.key)
+            combined = expected.attributes | expected.normalize_attributes
+            assert (
+                existing == combined
+            ), f"Unexpected member mismatch for key {expected.key!r}: {existing!r} != {combined!r}"
+            result = expected
+        else:
+            actual = self._import_item_with_attributes(
+                item=member,
+                spec=self.member_table_spec,
+            )
+            self.set_member_data(
+                expected.key,
+                actual.attributes | actual.normalize_attributes,
+            )
+            result = actual
+        return result
+
+    def _import_item_with_attributes(
+        self,
+        *,
+        item: ItemWithAttributesT,
+        spec: TableSpecification,
+    ) -> PreparedItemWithAttributes:
+        table: Table = self.db[spec.name]
+        prep = PreparedItemWithAttributes.prepare_from_item_and_spec(
+            item=item,
+            spec=spec,
+        )
+        row = {spec.key_name: prep.key} | prep.attributes
+        try:
+            new_key = table.insert(row)
+            self.debug[spec.name][new_key] = item
+            assert (
+                prep.key == new_key
+            ), f"Unexpected key mismatch for table {spec.name!r}: {prep.key!r} != {new_key!r}"
+        except IntegrityError as ie:
+            existing = self.debug[spec.name][prep.key]
+            raise KeyboardInterrupt(existing, item) from ie
+        property_fk_name = spec.name_when_used_as_foreign_key
+        actual_properties: ItemWithAttributesDataT = {}
+        for k, v in prep.normalize_attributes.items():
+            property_table = self.get_property_table(spec, k)
+            skip_actual = False
+            match k, v:
+                case _, None:
+                    # avoid(?) normalized nulls
+                    skip_actual = True
+                case _, str() | bool() | int():
+                    property_row = {property_fk_name: prep.key, k: v}
+                    property_table.upsert(property_row, [property_fk_name])
+                case _, list():
+                    property_rows = [
+                        {property_fk_name: prep.key, self.list_index_key: i, k: v}
+                        for i, x in enumerate(v)
+                    ]
+                    property_table.upsert_many(
+                        property_rows, [property_fk_name, self.list_index_key]
+                    )
+                case _, dict():
+                    ic("dict", spec.name, prep.key, k, v)
+                    exit()
+                case _:
+                    ic("unhandled", spec.name, prep.key, k, type(v))
+                    exit()
+            if not skip_actual:
+                actual_properties[k] = v
+        result = PreparedItemWithAttributes(
+            key=prep.key,
+            attributes=prep.attributes,
+            normalize_attributes=actual_properties,
+            extra=prep.extra,
+        )
+        return result
 
 
 def get_default_gitlab(
