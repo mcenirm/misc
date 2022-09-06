@@ -268,8 +268,18 @@ class DbHelper:
         name="",
         key_name="",
         key_type=Any,
-        attrs_ignore=frozenset(),
-        attrs_do_not_normalize=frozenset(),
+        attrs_ignore=frozenset(
+            {
+                "created_by",
+            }
+        ),
+        attrs_do_not_normalize=frozenset(
+            {
+                "access_level",
+                "created_at",
+                "membership_state",
+            }
+        ),
     )
 
     list_index_key: str = "_i"
