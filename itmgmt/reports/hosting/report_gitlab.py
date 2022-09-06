@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import defaultdict
 from csv import DictWriter
 from dataclasses import dataclass, field
-from itertools import islice
 from pathlib import Path
 from sys import exit, stdout
 from typing import Any, Generator
@@ -170,6 +169,7 @@ class DbHelper:
                 "container_registry_enabled",
                 "enforce_auth_checks_on_uploads",
                 "external_authorization_classification_label",
+                "forked_from_project",
                 "forking_access_level",
                 "forks_count",
                 "import_status",
@@ -187,6 +187,7 @@ class DbHelper:
                 "only_allow_merge_if_pipeline_succeeds",
                 "open_issues_count",
                 "operations_access_level",
+                "owner",
                 "packages_enabled",
                 "pages_access_level",
                 "permissions",
@@ -205,6 +206,7 @@ class DbHelper:
                 "security_and_compliance_enabled",
                 "service_desk_enabled",
                 "shared_runners_enabled",
+                "shared_with_groups",
                 "snippets_access_level",
                 "snippets_enabled",
                 "squash_commit_template",
@@ -251,11 +253,11 @@ class DbHelper:
                 "expires_at",
                 "group_id",
                 "membership_state",
+                "project_id",
             }
         ),
         attrs_do_not_normalize=frozenset(
             {
-                "avatar_url",
                 "name",
                 "state",
                 "username",
@@ -355,13 +357,9 @@ class DbHelper:
         *,
         min_access_level: AccessLevel = AccessLevel.REPORTER,
     ) -> Generator[ClubT, None, None]:
-        # TODO remove islice
-        for club in islice(
-            manager.list(
-                iterator=True,
-                min_access_level=int(min_access_level),
-            ),
-            5,
+        for club in manager.list(
+            iterator=True,
+            min_access_level=int(min_access_level),
         ):
             yield club
 
@@ -420,11 +418,7 @@ class DbHelper:
         club: ClubT,
         /,
     ) -> Generator[MemberT, None, None]:
-        # TODO remove islice
-        for member in islice(
-            club.members.list(iterator=True),
-            3,
-        ):
+        for member in club.members.list(iterator=True):
             yield member
 
     def _import_direct_member_of_club(
