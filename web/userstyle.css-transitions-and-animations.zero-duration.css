@@ -1,0 +1,8 @@
+/* https://dev.webonomic.nl/how-to-disable-css-transforms-transistions-and-animations#comment-21274 */
+
+* {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+}
