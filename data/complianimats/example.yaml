@@ -1,0 +1,28 @@
+facets:
+  Actor enrolled?:
+    - yes
+    - no
+  Target type:
+    - root
+    - non-root
+  Action:
+    - login
+    - ssh
+    - su
+    - sudo
+  SEP:
+    - BLANK
+  Applicable?:
+    - TODO
+  Expected result:
+    - TODO
+  Expect Duo?:
+    - TODO
+  Expect TOTP?:
+    - TODO
+  Compliant scenario?:
+    - TODO
+  Compliant result?:
+    - TODO
+  Comments:
+    - TODO
