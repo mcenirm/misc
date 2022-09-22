@@ -42,6 +42,8 @@ if ($asjar) {
 else {
     $ArgumentList += @('-classpath', (($LauncherMoreJars + @($LauncherMainJar)) -join ';'), $LauncherMainClass)
 }
+# TODO check for existence of `cert.PEM` in launcher dir, and use as default argument (?)
+#      v1.9.05 adds `cert.PEM` as only non-flagged argument to command-line
 $ArgumentList += $args
 
 @($JavaExe) + $ArgumentList | Out-GridView
