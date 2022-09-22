@@ -1,0 +1,18 @@
+#!/bin/bash
+# can be installed as /etc/cron.hourly/backup_adhoc_remotes.cron
+
+set -eu
+
+name=$(basename -- "$BASH_SOURCE")
+lockfile=/var/lock/$name
+
+(
+  flock -x -w 10 200 || exit 0
+
+  shopt -s nullglob
+  for backup in /Volumes/backup-*/backup--*/backup.marker
+  do
+    "$backup"
+  done > /var/tmp/$name.$(date -u -Is).log
+
+) 200>"$lockfile"

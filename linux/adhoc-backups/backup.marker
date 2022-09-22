@@ -1,0 +1,19 @@
+#!/bin/bash
+set -eu
+
+# backup destination
+dst=$(dirname -- "$(readlink -f -- "$0")")
+
+# name of remote system (from parent directory)
+remote=$(dirname -- "$dst")
+remote=${remote##*backup-}
+
+# what to backup on remote system (from destination, converting "--" to "/")
+src=$(basename -- "$dst")
+src=${src#backup}
+src=${src//--/\/}
+
+# perform backup using https://github.com/laurent22/rsync-time-backup
+rsync_tmbackup.sh "root@$remote:$src" "$dst" "$dst/exclusion.txt"
+# caveat: not sure how to manage sudo on remote end
+# maybe something like: --rsync-append-flags '--rsync-path=sudo\ rsync'
