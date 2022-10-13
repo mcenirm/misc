@@ -24,6 +24,7 @@ $LauncherMainClass = 'com.cisco.launcher.Launcher'
 $LauncherMainJar = 'asdm-launcher.jar'
 $LauncherMoreJars = @('lzma.jar', 'jploader.jar', 'retroweaver-rt-2.0.jar')
 $JavaOpts = @('-Xms64m', '-Xmx512m', '-Dsun.swing.enableImprovedDragGesture=true')
+$DefaultCertName = 'cert.PEM'
 
 if ($SocksProxyHost) {
     $JavaOpts += "-DsocksProxyHost=$($SocksProxyHost)"
@@ -42,9 +43,12 @@ if ($asjar) {
 else {
     $ArgumentList += @('-classpath', (($LauncherMoreJars + @($LauncherMainJar)) -join ';'), $LauncherMainClass)
 }
-# TODO check for existence of `cert.PEM` in launcher dir, and use as default argument (?)
-#      v1.9.05 adds `cert.PEM` as only non-flagged argument to command-line
-$ArgumentList += $args
+if ($args.Count -gt 0) {
+    $ArgumentList += $args
+}
+elseif (Test-Path -Path (Join-Path -Path $LauncherDir -ChildPath $DefaultCertName) -PathType Leaf) {
+    $ArgumentList += @($DefaultCertName)
+}
 
 @($JavaExe) + $ArgumentList | Out-GridView
 
