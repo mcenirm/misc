@@ -2326,3 +2326,23 @@ words = [
         "funir",
     ]
 ]
+
+
+if __name__ == "__main__":
+    from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+    from random import sample
+
+    p = ArgumentParser(
+        description="Print N random words from the list",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        "n",
+        default=5,
+        help="number of words to print",
+        metavar="N",
+        nargs="?",
+        type=int,
+    )
+    args = p.parse_args()
+    print("\n".join(sample(words, k=args.n)))
