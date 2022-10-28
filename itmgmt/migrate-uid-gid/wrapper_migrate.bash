@@ -36,7 +36,7 @@ lgs=()
 for db in group passwd
 do
   lg=logs/$(hostname -s).$db.$(date +%s.%F).log
-  "${migrate_cmd[@]}" $db "$@" > "$lg"
+  "${migrate_cmd[@]}" $db "$@" > "$lg" || :
   lgs+=( "$lg" )
 done
 wc -l "${lgs[@]}"
