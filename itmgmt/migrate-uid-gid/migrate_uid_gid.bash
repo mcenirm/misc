@@ -114,9 +114,6 @@ done
 for name in "${!name_map[@]}"
 do
   oldid=${name_map[$name]}
-  if [ "${found_ids[$oldid]+EXISTS}" = EXISTS ]
-  then
-    newid=${id_map[$oldid]}
-    ChangeID_$dbname "$name" "$newid"
-  fi
+  newid=${id_map[$oldid]}
+  ChangeID_$dbname "$name" "$newid"
 done
