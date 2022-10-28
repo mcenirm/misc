@@ -60,12 +60,12 @@ do
   IFS=: read -r name oldid newid <<<"$entry"
   curid=$(getent $dbname "$name" | cut -d: -f3 || echo MISSING)
   case "$curid" in
-    MISSING) echo >&2 "SKIPPING: unknown user: $entry" ;;
+    MISSING) echo >&2 "SKIPPING: $dbname unknown name: $entry" ;;
     $oldid)
       id_map[$oldid]=$newid
       name_map[$name]=$oldid
       ;;
-    *) echo >&2 "SKIPPING: id mismatch: $curid != $entry" ;;
+    *) echo >&2 "SKIPPING: $dbname id mismatch: $curid != $entry" ;;
   esac
 done
 
