@@ -1,0 +1,1 @@
+* Oops. [`/var/log/lastlog`](https://man7.org/linux/man-pages/man8/lastlog.8.html) is a sparse file indexed by `uid`. That is, the `lastlog` entries for `oldid` are not connected to the entries for `newid`.
