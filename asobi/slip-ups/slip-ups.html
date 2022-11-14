@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+
+<body>
+    <table id="board">
+        <caption>Board</caption>
+        <thead>
+            <th>&nbsp;</th>
+            <th id="column-th-1">1</th>
+        </thead>
+        <tbody>
+            <tr id="row-2">
+                <th id="row-th-2">2</th>
+                <td id="tile-2-1">2-1</td>
+            </tr>
+        </tbody>
+    </table>
+    <pre id="messages">...</pre>
+</body>
+
+<script>
+
+    /**
+     * Return the id string for the tr element with the given index.
+     * @param {number} rowIndex index of tr element
+     */
+    function idForTrElement(rowIndex) {
+        return `row-${rowIndex}`;
+    }
+
+    /** @type {HTMLPreElement} */
+    const messagesElement = document.getElementById("messages");
+    /** @type {HTMLTableElement} */
+    const boardElement = document.getElementById("board");
+    const tbodyElement = boardElement.tBodies[0];
+    const rowCount = 3;
+    const columnCount = 2;
+    for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+        /** @type {HTMLTableRowElement} */
+        let trId = idForTrElement(rowIndex);
+        let trElement = document.getElementById(trId);
+        if (trElement === null) {
+            trElement = tbodyElement.insertRow();
+            trElement.id = trId;
+        }
+    }
+</script>
+
+</html>
