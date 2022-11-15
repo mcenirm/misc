@@ -3,9 +3,25 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta
+        http-equiv="X-UA-Compatible"
+        content="IE=edge"
+    >
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
     <title>Document</title>
+    <style>
+        #board {
+            border-style: solid;
+        }
+
+        #board th {
+            background-color: lightgray;
+        }
+
+    </style>
 </head>
 
 <body>
@@ -24,7 +40,6 @@
     </table>
     <pre id="messages">...</pre>
 </body>
-
 <script>
 
     /**
@@ -34,6 +49,22 @@
     function idForTrElement(rowIndex) {
         return `row-${rowIndex}`;
     }
+    function fixRow(rowIndex) {
+        let rowId = idForRow(rowIndex);
+        let rowThId = idForRowTh(rowIndex);
+        let rowElement = document.getElementById(rowId);
+        if (rowElement === null) {
+            rowElement = document.createElement("tr");
+            rowElement.id = rowId;
+            rowThElement = document.createElement("th");
+            rowThElement.id = rowThId;
+            tbody.appendChild(rowElement);
+        }
+    }
+    function idForColumnTh(columnIndex) { return `column-th-${columnIndex}`; }
+    function idForRow(rowIndex) { return `row-${rowIndex}`; }
+    function idForRowTh(rowIndex) { return `row-th-${rowIndex}`; }
+    function idForTile(rowIndex, columnIndex) { return `tile-${rowIndex}-${columnIndex}`; }
 
     /** @type {HTMLPreElement} */
     const messagesElement = document.getElementById("messages");
