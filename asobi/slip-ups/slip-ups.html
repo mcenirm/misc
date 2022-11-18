@@ -43,27 +43,42 @@
 <script>
 
     /**
-     * Return the id string for the tr element with the given index.
-     * @param {number} rowIndex index of tr element
+     * Return the id string for the th element with the given column index.
+     * @param {number} columnIndex index of column
      */
-    function idForTrElement(rowIndex) {
-        return `row-${rowIndex}`;
+    function idForColumnThElement(columnIndex) {
+        return `column-th-${columnIndex}`;
     }
+
+    /**
+     * Return the id string for the tr element with the given row index.
+     * @param {number} rowIndex index of row
+     */
+    function idForRowTrElement(rowIndex) {
+        return `row-tr-${rowIndex}`;
+    }
+
+    /**
+     * Return the id string for the th element with the given row index.
+     * @param {number} rowIndex index of row
+     */
+    function idForRowThElement(rowIndex) {
+        return `row-th-${rowIndex}`;
+    }
+
     function fixRow(rowIndex) {
-        let rowId = idForRow(rowIndex);
-        let rowThId = idForRowTh(rowIndex);
-        let rowElement = document.getElementById(rowId);
-        if (rowElement === null) {
-            rowElement = document.createElement("tr");
-            rowElement.id = rowId;
-            rowThElement = document.createElement("th");
-            rowThElement.id = rowThId;
-            tbody.appendChild(rowElement);
+        let rowTrElementId = idForRowTrElement(rowIndex);
+        let rowThElementId = idForRowThElement(rowIndex);
+        /** @type {HTMLTableRowElement} */
+        let rowTrElement = document.getElementById(rowTrElementId);
+        if (rowTrElement === null) {
+            rowTrElement = tbodyElement.insertRow();
+            rowTrElement.id = rowTrElementId;
+            let rowThElement = rowTrElement.insertCell();
+            rowThElement.id = rowThElementId;
         }
     }
-    function idForColumnTh(columnIndex) { return `column-th-${columnIndex}`; }
-    function idForRow(rowIndex) { return `row-${rowIndex}`; }
-    function idForRowTh(rowIndex) { return `row-th-${rowIndex}`; }
+
     function idForTile(rowIndex, columnIndex) { return `tile-${rowIndex}-${columnIndex}`; }
 
     /** @type {HTMLPreElement} */
@@ -74,13 +89,7 @@
     const rowCount = 3;
     const columnCount = 2;
     for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
-        /** @type {HTMLTableRowElement} */
-        let trId = idForTrElement(rowIndex);
-        let trElement = document.getElementById(trId);
-        if (trElement === null) {
-            trElement = tbodyElement.insertRow();
-            trElement.id = trId;
-        }
+        fixRow(rowIndex);
     }
 </script>
 
