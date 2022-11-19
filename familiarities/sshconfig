@@ -1,0 +1,26 @@
+CanonicalDomains      example.edu example.gov
+CanonicalizeHostname  yes
+CanonicalizeMaxDots   0
+
+Host a.example.edu b.example.edu c.example.edu
+  ProxyJump j.example.edu
+
+Host d.example.edu
+Host e.example.edu
+Host f.example.edu
+
+Host *.example.edu
+  User exampleuser
+  #ForwardX11Trusted     yes
+
+Host gitlab.com github.com
+  ForwardX11Trusted  no
+  ForwardX11         no
+  
+Host *
+  #ForwardX11            yes
+  ServerAliveInterval  29
+  IdentityFile         ~/.ssh/id_ecdsa
+  IdentityFile         ~/.ssh/id_ed25519
+  LogLevel             ERROR
+  ForwardAgent         yes
