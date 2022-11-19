@@ -32,9 +32,9 @@
             <th id="column-th-1">1</th>
         </thead>
         <tbody>
-            <tr id="row-2">
+            <tr id="row-tr-2">
                 <th id="row-th-2">2</th>
-                <td id="tile-2-1">2-1</td>
+                <td id="tile-td-2-1">2-1</td>
             </tr>
         </tbody>
     </table>
@@ -66,6 +66,30 @@
         return `row-th-${rowIndex}`;
     }
 
+    /**
+     * Return the id string for the td element with the given row and column indexes.
+     * @param {number} rowIndex index of row
+     * @param {number} columnIndex index of column
+     */
+    function idForTileTdElement(rowIndex, columnIndex) {
+        return `tile-td-${rowIndex}-${columnIndex}`;
+    }
+
+    /**
+     * TODO add TH element to TR.
+     * can't use insertCell because it only does TD, and can't rename tag
+     * @param {HTMLTableRowElement} trElement the destination TR element
+     * @param {number} index the insertion index
+     * @returns {HTMLTableCellElement} the new TH element
+     */
+    function insertThCell(trElement, index) {
+        // TODO
+    }
+
+    /**
+     * Fix an entire row given the row index.
+     * @param {number} rowIndex index of row
+     */
     function fixRow(rowIndex) {
         let rowTrElementId = idForRowTrElement(rowIndex);
         let rowThElementId = idForRowThElement(rowIndex);
@@ -74,12 +98,20 @@
         if (rowTrElement === null) {
             rowTrElement = tbodyElement.insertRow();
             rowTrElement.id = rowTrElementId;
-            let rowThElement = rowTrElement.insertCell();
+        }
+        let oldRowNode = tbodyElement.rows.item(rowIndex);
+        if (rowTrElement !== oldRowNode) {
+            tbodyElement.replaceChild(rowTrElement, oldRowNode);
+            tbodyElement.appendChild(oldRowNode);
+        }
+        /** @type {HTMLTableCellElement} */
+        let rowThElement = document.getElementById(rowThElementId);
+        if (rowThElement === null) {
+            rowThElement = rowTrElement.insertCell();
             rowThElement.id = rowThElementId;
         }
+        rowThElement.textContent = `${rowIndex}`;
     }
-
-    function idForTile(rowIndex, columnIndex) { return `tile-${rowIndex}-${columnIndex}`; }
 
     /** @type {HTMLPreElement} */
     const messagesElement = document.getElementById("messages");
