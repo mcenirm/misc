@@ -75,7 +75,7 @@ fi
   fi
 ) | (
   # Keep only unchanged items
-  sed -n -e 's#^\.\.\.\.\.\.\.\.\.  [ acdglmn] /#/#p'
+  sed -n -e 's#^\.\.\.\.\.\.\.\.\.  [ acdlmn] /#/#p'
 ) | (
   # For regular files and symlinks,
   # print exclusion rules based on real paths to item
