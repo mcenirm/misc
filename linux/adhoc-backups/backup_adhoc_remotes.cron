@@ -1,7 +1,9 @@
-#!/bin/bash
-# can be installed as /etc/cron.hourly/backup_adhoc_remotes.cron
+#!/usr/bin/env bash
+# vim: shiftwidth=2 tabstop=2 expandtab
+set -euo pipefail
+[[ "${TRACE-0}" == "1" ]] && set -x
 
-set -eu
+# can be installed as /etc/cron.hourly/backup_adhoc_remotes.cron
 
 name=$(basename -- "$BASH_SOURCE")
 lockfile=/var/lock/$name
