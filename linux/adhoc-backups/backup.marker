@@ -14,6 +14,6 @@ src=${src#backup}
 src=${src//--/\/}
 
 # perform backup using https://github.com/laurent22/rsync-time-backup
-rsync_tmbackup.sh "root@$remote:$src" "$dst" "$dst/exclusion.txt"
+rsync_tmbackup.sh --rsync-append-flags '--sparse' "root@$remote:$src" "$dst" "$dst/exclusion.txt"
 # caveat: not sure how to manage sudo on remote end
 # maybe something like: --rsync-append-flags '--rsync-path=sudo\ rsync'
