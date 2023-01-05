@@ -13,6 +13,6 @@ lockfile=/var/lock/$name
   for backup in /Volumes/backup-*/backup--*/backup.marker
   do
     "$backup"
-  done > /var/tmp/$name.$(date -u -Is).log
+  done > /var/tmp/$name.$(date -u +%Y-%m-%d.%H%M%Sz).log
 
 ) 200>"$lockfile"
