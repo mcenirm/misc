@@ -5,7 +5,7 @@ set -euo pipefail
 
 Usage () { cat >&2 <<EOF
 Usage: $0 foo [bar ...]
-Migrate UID/GID
+Some sort of vague description about this script
 Where:
   foo    a foo
   bar    some bars
