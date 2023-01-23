@@ -547,10 +547,12 @@ def run(stdin, /) -> None:
     hours_per_point = remaining_hours / book_totals.points
     ic(hours_per_point)
     keywidth = max(len(str(_)) for _ in book_summary.keys())
+    msghdr = "  Hrs   TBA    Adj%    %eff key       score"
     msgfmt = f"{{:5.1f}} {{:5.1f}} {{:7.1%}} {{:7.1%}} {{:{keywidth}}} {{}}"
     total_percent_effort = 0
     total_adjusted_percent_effort = 0
     total_to_be_allocated_hours = EffortHours(0)
+    print(msghdr)
     for key, score in book_summary.items():
         account_name = str(key).upper()
         hours_equivalent = hours_per_point * score.points
