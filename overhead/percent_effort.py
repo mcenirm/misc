@@ -5,19 +5,18 @@ import math
 import re
 import string
 import sys
-from collections import defaultdict
 from collections.abc import KeysView, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import total_ordering
 from logging import warning
-from typing import Optional, TextIO, Type, cast
+from typing import Optional, TextIO, Type
 from urllib.parse import urlparse
 
 from icecream import ic  # type: ignore
 from rich import inspect as rinspect
 from rich import print as rprint
-from rich.table import Table
+from rich.table import Column, Table
 
 
 def _build_abbreviations(fmt: str, incr_days: int) -> set[str]:
@@ -516,6 +515,26 @@ def parse_as_day_and_entry_list(
         return None
 
 
+def effort_table_row(
+    reported_hours,
+    effortable_hours,
+    to_be_allocated_hours,
+    adjusted_percent_effort,
+    percent_effort,
+    key,
+    score,
+) -> list[str]:
+    return [
+        f"{reported_hours:5.1f}" if reported_hours else "---",
+        f"{effortable_hours:5.1f}" if effortable_hours else "---",
+        f"{to_be_allocated_hours:5.1f}" if to_be_allocated_hours else "---",
+        f"{adjusted_percent_effort:7.1%}" if adjusted_percent_effort else "---",
+        f"{percent_effort:7.1%}" if percent_effort else "---",
+        str(key) if key else "---",
+        str(score) if score else "---",
+    ]
+
+
 def load(infile: TextIO, book: Book) -> None:
     for line_num, line in enumerate([""] + [str(_).strip() for _ in infile]):
         if not line or line.upper() in WEEKDAY_ABBREVIATIONS:
@@ -540,56 +559,77 @@ def run(stdin, /) -> None:
     book_summary = book.summarize()
     book_totals = Book.totals(book_summary)
     ic(book_totals)
-    effortable_hours = MAX_HOURS - book_totals.auxiliary_hours
+
+    total_hours = book_totals.hours + book_totals.auxiliary_hours
+    ic(total_hours)
+    total_points = book_totals.points + book_totals.auxiliary_points
+    ic(total_points)
+    effortable_hours = MAX_HOURS - total_hours
+    if effortable_hours < 0:
+        warning(
+            f"Total hours exceeds max hours ({total_hours} > {MAX_HOURS}). Points will be ignored."
+        )
+        effortable_hours = 0
+        hours_per_point = 0
+    elif total_points > 0:
+        hours_per_point = effortable_hours / total_points
     ic(effortable_hours)
-    remaining_hours = effortable_hours - book_totals.hours
-    ic(remaining_hours)
-    hours_per_point = remaining_hours / book_totals.points
     ic(hours_per_point)
-    keywidth = max(len(str(_)) for _ in book_summary.keys())
-    msghdr = "  Hrs   TBA    Adj%    %eff key       score"
-    msgfmt = f"{{:5.1f}} {{:5.1f}} {{:7.1%}} {{:7.1%}} {{:{keywidth}}} {{}}"
+
     total_percent_effort = 0
     total_adjusted_percent_effort = 0
     total_to_be_allocated_hours = EffortHours(0)
-    print(msghdr)
+
+    efforts = Table(
+        Column("Hrs", justify="right"),
+        Column("PtHrs", justify="right"),
+        Column("TBA", justify="right"),
+        Column("Adj%", justify="right"),
+        Column("%eff", justify="right"),
+        Column("key", justify="left"),
+        Column("score", justify="left"),
+    )
     for key, score in book_summary.items():
         account_name = str(key).upper()
+        max_hours = 0
+        for constraint in constraints_by_key.get(
+            key, DistributionConstraintByAccountNameDict()
+        ).values():
+            match constraint:
+                case HourDistributionConstraint() as hdc:
+                    max_hours += hdc.max_hours
+        if max_hours > 0:
+            ic(key, max_hours)
         hours_equivalent = hours_per_point * score.points
         to_be_allocated_hours = EffortHours(0)
-        percent_effort = score.points / book_totals.points
-        if key in constraints_by_key:
-            constraints = constraints_by_key[key]
-            max_hours = sum(
-                [
-                    cast(HourDistributionConstraint, _).max_hours
-                    for _ in constraints.values()
-                    if isinstance(_, HourDistributionConstraint)
-                ]
-            )
-            if max_hours > 0 and hours_equivalent > max_hours:
-                to_be_allocated_hours = hours_equivalent - max_hours
-                hours_equivalent = max_hours
-            # for a, c in constraints.items():
-            #     if isinstance(c, HourDistributionConstraint):
-            #         hdc = cast(HourDistributionConstraint, c)
-            #         max_hours += hdc.max_hours
-            #     ic(a, c)
-        adjusted_percent_effort = hours_equivalent / effortable_hours
+        if max_hours > 0 and hours_equivalent > max_hours:
+            to_be_allocated_hours = hours_equivalent - max_hours
+            hours_equivalent = max_hours
+        percent_effort = (score.hours + hours_equivalent) / (
+            MAX_HOURS - book_totals.auxiliary_hours
+        )
         total_percent_effort += percent_effort
         total_to_be_allocated_hours += to_be_allocated_hours
-        total_adjusted_percent_effort += adjusted_percent_effort
-        msg = msgfmt.format(
-            hours_equivalent,
-            to_be_allocated_hours,
-            adjusted_percent_effort,
-            percent_effort,
-            str(key),
-            score,
+        if effortable_hours > 0:
+            adjusted_percent_effort = hours_equivalent / effortable_hours
+            total_adjusted_percent_effort += adjusted_percent_effort
+        else:
+            adjusted_percent_effort = 0
+        efforts.add_row(
+            *effort_table_row(
+                score.hours or score.auxiliary_hours,
+                hours_equivalent,
+                to_be_allocated_hours,
+                adjusted_percent_effort,
+                percent_effort,
+                str(key),
+                score,
+            )
         )
-        print(msg)
-    print(
-        msgfmt.format(
+    efforts.add_section()
+    efforts.add_row(
+        *effort_table_row(
+            total_hours,
             effortable_hours,
             total_to_be_allocated_hours,
             total_adjusted_percent_effort,
@@ -598,6 +638,7 @@ def run(stdin, /) -> None:
             "",
         )
     )
+    rprint(efforts)
     rprint(book.auxiliary_table())
 
 
