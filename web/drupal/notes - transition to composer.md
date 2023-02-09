@@ -66,7 +66,7 @@ TODO, but this assumes a Drupal 8 instance that started from a distribution arch
     composer install
     ```
 
-    If the output includes:
+    If the output includes
 
     > Your requirements could not be resolved to an installable set of packages.
 
@@ -82,17 +82,11 @@ TODO, but this assumes a Drupal 8 instance that started from a distribution arch
        composer require drupal/foo:1.2.3
        ```
 
-4. Remove any remaining problematic packages:
+4. Remove any remaining problematic packages
 
        ```shell
        composer remove drupal/foo drupal/bar
        ```
-
-5. Try to resolve requirements and download packages again
-
-    ```shell
-    composer install
-    ```
 
 Note: Because the fake `composer.json` file does include `composer/installers` and `installer-paths`,
 all of the packages will be downloaded to the default `vendor/` folder (eg, `vendor/drupal/core`).
@@ -144,4 +138,35 @@ all of the packages will be downloaded to the default `vendor/` folder (eg, `ven
 
 ## Replace unchanged existing files with "required" packages
 
-TODO
+1. Require and download unchanged packages
+
+    ```shell
+    cd "$DRUPALROOT"
+    composer require $(cat "$SCRATCH"/to-be-required.lst)
+    ```
+
+2. Archive existing unchanged files
+
+    ```shell
+    mkdir -v "$SCRATCH"/archived
+    cd "$DRUPALROOT"
+    for existing in $(cat "$SCRATCH"/to-be-cleaned.lst)
+    do
+      dest=$SCRATCH/archived/$(dirname "$existing")
+      mkdir -pv "$dest"
+      mv -iv "$existing" "$dest"
+    done
+    ```
+
+3. Rebuild Drupal cache
+
+    ```shell
+    drush --root="$DRUPALROOT" cr
+    ```
+
+4. Collect new extension details
+
+    ```shell
+    cd "$SCRATCH"
+    drush --root="$DRUPALROOT" pml --format=json 2>/dev/null | jq -S . > new-extensions.json
+    ```
