@@ -164,9 +164,13 @@ all of the packages will be downloaded to the default `vendor/` folder (eg, `ven
     drush --root="$DRUPALROOT" cr
     ```
 
-4. Collect new extension details
+4. Backup previous extension details
 
     ```shell
     cd "$SCRATCH"
-    drush --root="$DRUPALROOT" pml --format=json 2>/dev/null | jq -S . > new-extensions.json
+    ts=$(date -d @$(stat -c %Y extensions.json) +%Y%m%d-%H%M%S)
+    for f in extensions.json non-core-extensions.json enabled-nce.json projects-in-use.json
+    do
+      mv -iv $f details.$ts.$f
+    done
     ```
