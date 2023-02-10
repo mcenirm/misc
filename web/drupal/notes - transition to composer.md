@@ -21,42 +21,59 @@ TODO, but this assumes a Drupal 8 instance that started from a distribution arch
 
 ## Collect extension details
 
-1. Use Drush to collect all extensions
+1. Backup previous extension details
+
+    ```shell
+    cd "$SCRATCH"
+    ts=$(date -d @$(stat -c %Y extensions.json) +%Y%m%d-%H%M%S)
+    for f in extensions.json non-core-extensions.json unmanaged-nce.json enabled-unmanaged.json projects-in-use.json fake
+    do
+      mv -iv $f details.$ts.$f
+    done
+    ```
+
+2. Use Drush to collect all extensions
 
     ```shell
     cd "$SCRATCH"
     drush --root="$DRUPALROOT" pml --format=json 2>/dev/null | jq -S . > extensions.json
     ```
 
-2. Filter out what looks like extensions from Drupal core
+3. Filter out what looks like extensions from Drupal core
 
     ```shell
     jq -S 'with_entries(select(.value.path|test("^core/")|not))' < extensions.json > non-core-extensions.json
     ```
 
-3. Just the enabled ones
+4. Filter out the ones managed by Composer
 
     ```shell
-    jq -S 'with_entries(select(.value.status == "Enabled"))' < non-core-extensions.json > enabled-nce.json
+    jq --argjson reqpkgs $(jq -c '.require|keys|map(sub("^drupal/";""))' < $DRUPALROOT/composer.json) -S 'with_entries(select(.value.project as $p|$reqpkgs|index($p)|not))' < non-core-extensions.json > unmanaged-nce.json
     ```
 
-4. Determine the projects with at least one enabled extension
+5. Just the enabled unmanaged ones
 
     ```shell
-    jq -S 'with_entries(select(.value.project|test("."))|(.key=.value.project)|(.value=(.value.version|tostring)))' < enabled-nce.json > projects-in-use.json
+    jq -S 'with_entries(select(.value.status == "Enabled"))' < unmanaged-nce.json > enabled-unmanaged.json
+    ```
+
+6. Determine the projects with at least one enabled but unmanaged extension
+
+    ```shell
+    jq -S 'with_entries(select(.value.project|test("."))|(.key=.value.project)|(.value=(.value.version|tostring)))' < enabled-unmanaged.json > projects-in-use.json
     ```
 
 
 ## Troubleshoot installability and dependencies
 
-1. Create fake composer.json based on the projects in use
+1. Create fake composer.json combining previously required packages and unmanaged projects in use
 
     Note: "8.9.20" is the final release of Drupal 8.x
 
     ```shell
     cd "$SCRATCH"
     mkdir -v fake
-    jq -S '{"repositories":[{"type":"composer","url":"https://packages.drupal.org/8"}],"require":(with_entries((.key|="drupal/"+.)|(.value|=sub("^8\\.x-";"")))+({"drupal/core":"8.9.20"}))}' < projects-in-use.json > fake/composer.json
+    jq --arg corever 8.9.20 --argjson prevreq $(jq -c '.require|with_entries(select(.key|test("^drupal/(?!core(-|$))")))' "$DRUPALROOT"/composer.json) -S '($corever|sub("\\..*$";""))as $coremaj|{"repositories":[{"type":"composer","url":("https://packages.drupal.org/"+$coremaj)}],"require":(with_entries((.key|="drupal/"+.)|(.value|=sub("^"+$coremaj+"\\.x-";"")))+$prevreq+({"drupal/core":$corever}))}' < projects-in-use.json > fake/composer.json
     ```
 
 2. Try to resolve requirements and download packages
@@ -102,7 +119,7 @@ all of the packages will be downloaded to the default `vendor/` folder (eg, `ven
     for project in $(jq -r 'keys[]' < projects-in-use.json )
     do
       fresh=fake/vendor/drupal/$project
-      existing=$( jq -r .$project.path < enabled-nce.json )
+      existing=$( jq -r .$project.path < enabled-unmanaged.json )
       if [ -d "$fresh" ]
       then
         echo -e "# $PWD/$fresh\n# $DRUPALROOT/$existing" > differences."$project".out
@@ -162,15 +179,4 @@ all of the packages will be downloaded to the default `vendor/` folder (eg, `ven
 
     ```shell
     drush --root="$DRUPALROOT" cr
-    ```
-
-4. Backup previous extension details
-
-    ```shell
-    cd "$SCRATCH"
-    ts=$(date -d @$(stat -c %Y extensions.json) +%Y%m%d-%H%M%S)
-    for f in extensions.json non-core-extensions.json enabled-nce.json projects-in-use.json
-    do
-      mv -iv $f details.$ts.$f
-    done
     ```
