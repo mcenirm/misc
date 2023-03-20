@@ -1,0 +1,99 @@
+---
+version: 2
+plan:
+  project-key: EXAMPLE
+  key: DIND
+  name: docker-in-docker
+  description: example build plan
+stages:
+  - Default Stage:
+      manual: false
+      final: false
+      jobs:
+        - Test ghcr.io token read vs write
+Test ghcr.io token read vs write:
+  key: JOB1
+  docker:
+    image: docker:dind
+    volumes:
+      ${bamboo.working.directory}: ${bamboo.working.directory}
+      ${bamboo.tmp.directory}: ${bamboo.tmp.directory}
+      /var/run/docker.sock: /var/run/docker.sock
+    docker-run-arguments: []
+  tasks:
+    - script:
+        interpreter: SHELL
+        scripts:
+          - ln -sv /usr/local/bin/docker /bin/docker
+        description: Help Docker tasks find docker cli
+    - script:
+        interpreter: SHELL
+        scripts:
+          - |-
+            type -a docker
+            docker version
+        description: Docker details
+    - any-task:
+        plugin-key: com.atlassian.bamboo.plugins.bamboo-docker-plugin:task.docker.cli
+        configuration:
+          commandOption: pull
+          pullUsername: mygithubusername
+          pullPassword: REDACTED
+          pullRepository: ghcr.io/${bamboo.image}:${bamboo.oldtag}
+          pullRegistryOption: custom
+        description: Pull
+    - script:
+        interpreter: SHELL
+        scripts:
+          - docker tag ${bamboo.registry}/${bamboo.image}:${bamboo.oldtag} ${bamboo.registry}/${bamboo.image}:${bamboo.newtag}
+        description: Retag image
+    - any-task:
+        plugin-key: com.atlassian.bamboo.plugins.bamboo-docker-plugin:task.docker.cli
+        configuration:
+          commandOption: push
+          username: mygithubusername
+          password: REDACTED
+          pushRepository: ghcr.io/${bamboo.image}:${bamboo.newtag}
+          registryOption: custom
+        description: Push
+  final-tasks:
+    - any-task:
+        plugin-key: com.atlassian.bamboo.plugins.bamboo-variable-inject-plugin:dump
+        configuration: {}
+        description: Dump
+  artifact-subscriptions: []
+variables:
+  image: mygithubusername/myexampledockerimage
+  newtag: somethingdifferent
+  oldtag: sha256-REDACTED.sig
+  registry: ghcr.io
+repositories: []
+# Remove line above if want to set repository with YAML file as primary repository of plan
+triggers: []
+branches:
+  create: manually
+  delete: never
+  link-to-jira: true
+notifications: []
+labels: []
+dependencies:
+  require-all-stages-passing: false
+  enabled-for-branches: true
+  block-strategy: none
+  plans: []
+other:
+  concurrent-build-plugin: system-default
+---
+version: 2
+plan:
+  key: EXAMPLE-DIND
+plan-permissions:
+  - users:
+      - mybamboousername
+    permissions:
+      - view
+      - edit
+      - build
+      - clone
+      - admin
+      - viewConfiguration
