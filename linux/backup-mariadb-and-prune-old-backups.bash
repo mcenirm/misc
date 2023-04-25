@@ -3,7 +3,7 @@
 set -euo pipefail
 [[ "${TRACE-0}" == "1" ]] && set -x
 
-default_destination=/var/lib/mariadb-backups
+default_destination=/x/mariadb-backups
 default_date_spec=backup.%Y-%m-%d-%H-%M-%S
 default_keep_count=10
 default_prune_days=5
