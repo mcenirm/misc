@@ -37,8 +37,8 @@ quiet=false
 while getopts 'd:k:p:s:qn' opt; do
   case "$opt" in
     d) destination=$OPTARG ;;
-    k) let keep_count=$OPTARG ;;
-    p) let prune_days=$OPTARG ;;
+    k) let keep_count=OPTARG ;;
+    p) let prune_days=OPTARG ;;
     s) date_spec=$OPTARG ;;
     u) dbuser=$OPTARG ;;
     q) quiet=true ;;
@@ -77,9 +77,8 @@ if [ ${#existing_target_dirs_by_mtime_asc[*]} -gt $keep_count ]
 then
   let mtime_threshold=$(date +%s -d "$prune_days days ago")
   let total=${#existing_target_dirs_by_mtime_asc[*]}
-  let prune_count=$(( $total - $keep_count ))
+  let prune_count=total-keep_count
   let prune_index=0 || :
-  declare -p  mtime_threshold total prune_count
   while [ $prune_index -lt $prune_count ]
   do
     IFS=: read -r mtime name <<<"${existing_target_dirs_by_mtime_asc[$prune_index]}"
@@ -104,7 +103,7 @@ then
     else
       break
     fi
-    let ++$prune_index
+    let ++prune_index
   done
 fi
 
