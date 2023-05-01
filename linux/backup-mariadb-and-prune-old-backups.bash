@@ -115,13 +115,13 @@ fi
 
 # Perform backup
 backup_cmd=(
-  mariabackup
+  mariadb-backup
   --backup
   --target-dir="$target_dir"
   --user="$dbuser"
 )
 prepare_cmd=(
-  mariabackup
+  mariadb-backup
   --prepare
   --target-dir="$target_dir"
 )
