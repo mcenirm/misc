@@ -1,0 +1,66 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="500"
+  height="500"
+  viewBox="0 0 100 100"
+  >
+  <style>
+    text {
+      font-family: monospace;
+      font-size: 2em;
+      font-weight: bold;
+      text-anchor: middle;
+      /* text-decoration-line: underline overline; */
+      /* dominant-baseline: middle; */
+    }
+    .dial {
+      fill: antiquewhite;
+    }
+    .ring {
+      display: none;
+      stroke: green;
+      fill: green;
+      fill-opacity: 50%;
+    }
+    .divider {
+      stroke: black;
+    }
+  </style>
+
+  <defs>
+    <path id="upper" d="M 20 50 A 1 1 0 0 1 80 50"/>
+    <path id="lower" d="M 20 50 A 1 1 0 0 0 80 50"/>
+  </defs>
+
+  <circle class="dial" cx="50%" cy="50%" r="50%" />
+
+  <g class="ring" transform="scale(1)" transform-origin="50% 50%">
+    <use href="#upper"/>
+    <use href="#lower"/>
+  </g>
+
+  <g class="divider">
+    <line x1="0" x2="100%" y1="50%" y2="50%" />
+    <line x1="50%" x2="50%" y1="50%" y2="100%" />
+  </g>
+
+  <g>
+    <text>
+      <textPath
+        href="#upper"
+        lengthAdjust="spacingAndGlyphs"
+        textLength="90%"
+        startOffset="50%"
+        >1234</textPath>
+    </text>
+    <text>
+      <textPath
+        href="#lower"
+        lengthAdjust="spacingAndGlyphs"
+        textLength="90%"
+        startOffset="50%"
+        dominant-baseline="hanging"
+        >5678</textPath>
+    </text>
+  </g>
+</svg>
