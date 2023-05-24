@@ -48,18 +48,48 @@ class TestHtml(unittest.TestCase):
                 self.assertEqual(expected, actual.tag)
 
     def test_children(self):
-        with self.subTest("void element"):
-            self.assertListEqual([], Fake3().children)
         with self.subTest("void element error if children"):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(TypeError):
                 Fake3()["text"]
+        with self.subTest("void element"):
+            self.assertListEqual(
+                [],
+                Fake3().children,
+            )
         with self.subTest("no children"):
-            self.assertListEqual([], Fake2().children)
+            self.assertListEqual(
+                [],
+                Fake2().children,
+            )
         with self.subTest("one text child"):
-            self.assertListEqual(["text"], Fake2()["text"].children)
+            self.assertListEqual(
+                ["text"],
+                Fake2()["text"].children,
+            )
         with self.subTest("two text children"):
             self.assertListEqual(
-                ["line 1", "line 2"], Fake2()["line 1", "line 2"].children
+                ["line 1", "line 2"],
+                Fake2()["line 1", "line 2"].children,
+            )
+        with self.subTest("some of the children are None"):
+            self.assertListEqual(
+                ["line 1", "line 2"],
+                Fake2()["line 1", None, None, "line 2", None].children,
+            )
+        with self.subTest("flatten lists"):
+            self.assertListEqual(
+                ["a", "b", "c", "d", "e"],
+                Fake2()[
+                    "a",
+                    [
+                        "b",
+                        [
+                            "c",
+                            "d",
+                        ],
+                    ],
+                    "e",
+                ].children,
             )
 
     def test_chunks_without_children(self):

@@ -1,22 +1,51 @@
+from __future__ import annotations
+
 import html
 import typing
 
 
 class HtmlElement:
-    def __init__(self, attrs: dict[str, str | None] = {}) -> None:
-        self.attrs = dict(attrs)
+    def __init__(self, attrs: HtmlAttrsMap = {}) -> None:
+        self.attrs: HtmlAttrsMap = dict(attrs)
         self.tag = self.__class__.__name__.lower()
         if self.tag != "html":
             self.tag = self.tag.removeprefix("html")
-        self.children: list[HtmlElement | str] = []
+        self.children: list[HtmlChild] = []
 
-    # brave misuse of __getitem__ from https://github.com/tavisrudd/throw_out_your_templates
-    def __getitem__(self, children) -> typing.Self:
-        if not isinstance(children, (tuple, list)):
-            children = [children]
-        for child in children:
-            if child is not None:
-                self.children.append(child)
+    def __getitem__(self, key: _SubKey | tuple[_SubKey]) -> typing.Self:
+        """`H1()["Misusing object subscripting to construct HTML element tree"]`
+
+        * Deals with both a[x] and a[x,y,z] syntax
+        * Flattens any lists sent through
+        * Quietly ignores any `None` values
+
+        ```
+        Tr()[
+            Td()["Cell 1"],
+            Td()["Cell 2"],
+        ]
+
+        ```
+
+        Using idea from https://github.com/tavisrudd/throw_out_your_templates
+        """
+        match key:
+            case tuple():
+                # called as e[c1,c2,c3]
+                for child in key:
+                    self[child]
+            case _:
+                # called as e[c1]
+                match key:
+                    case None:
+                        ...
+                    case str() | HtmlElement():
+                        self.children.append(key)
+                    case list():
+                        for child in key:
+                            self[child]
+                    case _:
+                        raise KeyError(key)
         return self
 
     def opentag(self) -> str:
@@ -55,9 +84,15 @@ class HtmlElement:
                 yield closetag
 
 
+HtmlAttrsMap: typing.TypeAlias = dict[str, str | None]
+HtmlChild: typing.TypeAlias = str | HtmlElement
+_OptionalHtmlChild: typing.TypeAlias = HtmlChild | None
+_SubKey: typing.TypeAlias = _OptionalHtmlChild | list[_OptionalHtmlChild]
+
+
 class HtmlVoidElement(HtmlElement):
-    def __getitem__(self, children) -> typing.Self:
-        raise ValueError("HTML void elements may not have children")
+    def __getitem__(self, *children) -> typing.Self:
+        raise TypeError("HTML void elements may not have children")
 
     def closetag(self) -> str:
         return ""
