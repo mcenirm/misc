@@ -19,7 +19,7 @@ param (
 
 $ErrorActionPreference = 'stop'
 
-$JavaExe = 'C:\B\jdk8u302-b08-jre\bin\java.exe'
+$JavaExe = Get-Command -Name java.exe -CommandType Application -All | Where-Object Version -Match 8.* | ForEach-Object Source
 $LauncherMainClass = 'com.cisco.launcher.Launcher'
 $LauncherMainJar = 'asdm-launcher.jar'
 $LauncherMoreJars = @('lzma.jar', 'jploader.jar', 'retroweaver-rt-2.0.jar')
@@ -50,6 +50,6 @@ elseif (Test-Path -Path (Join-Path -Path $LauncherDir -ChildPath $DefaultCertNam
     $ArgumentList += @($DefaultCertName)
 }
 
-@($JavaExe) + $ArgumentList | Out-GridView
+# @($JavaExe) + $ArgumentList | Out-GridView
 
 Start-Process -FilePath $JavaExe -ArgumentList $ArgumentList -WorkingDirectory $LauncherDir
