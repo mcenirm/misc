@@ -1,3 +1,10 @@
 wsusscn2.cab
 results/
 backup */
+
+# for Download-Office2019.ps1
+officeconfig.xml
+officedeploymenttool_*
+officedownloads/
+officesetup.exe
+temp-officeconfig.xml
