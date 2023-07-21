@@ -1,0 +1,11 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\SOFTWARE\SimonTatham\PuTTY\Sessions\Default%20Settings]
+"AgentFwd"=dword:00000001
+"AltSpace"=dword:00000001
+"CtrlShiftCV"="explicit"
+"PingInterval"=dword:00000002
+"PingIntervalSecs"=dword:00000011
+"Printer"="Microsoft Print to PDF"
+"TCPKeepalives"=dword:00000001
+"UserNameFromEnvironment"=dword:00000001
