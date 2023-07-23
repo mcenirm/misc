@@ -3,6 +3,7 @@ Windows Registry Editor Version 5.00
 [HKEY_CURRENT_USER\SOFTWARE\SimonTatham\PuTTY\Sessions\Default%20Settings]
 "Font"="Cascadia Code"
 "FontHeight"=dword:0000000b
+"FontIsBold"=dword:00000001
 "ScrollbackLines"=dword:7fffffff
 "ScrollBarFullScreen"=dword:00000001
 "SshBanner"=dword:00000000
