@@ -1,6 +1,6 @@
 Name:           bogus-lsb-core
 Version:        4.1
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Bogus Linux Standard Base
 License:        LicenseRef-Fedora-Public-Domain
 
@@ -10,8 +10,13 @@ Requires:       /%{_lib}/ld-linux.so.2
 Requires:       /%{_lib}/ld-linux-%{__isa}.so.2
 %endif
 
-BuildRequires:  ( /bin/ln or %{_bindir}/ln )
+%if %{__isa_bits} == 64
+Provides:       ld-lsb.so.3()(64bit)
+%else
+Provides:       ld-lsb.so.3
+%endif
 
+BuildRequires:  ( /bin/ln or %{_bindir}/ln )
 
 # Skip ldconfig as part of __os_install_post
 # since it keeps deleting the symlink
