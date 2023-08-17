@@ -107,34 +107,19 @@ public class MinimizeCodeBase {
                 null, null, javaFiles);
         if (!task.call()) {
             System.out.println("compilation failed");
+            System.out.println();
         }
 
+        int errorCount = 0;
         for (final Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
             final Diagnostic.Kind kind = diagnostic.getKind();
-            final String code = diagnostic.getCode();
-            final long columnNumber = diagnostic.getColumnNumber();
-            final long endPosition = diagnostic.getEndPosition();
-            final long lineNumber = diagnostic.getLineNumber();
-            final String message = diagnostic.getMessage(null);
-            final long position = diagnostic.getPosition();
-            final JavaFileObject source = diagnostic.getSource();
-            final long startPosition = diagnostic.getStartPosition();
-
             if (Diagnostic.Kind.ERROR == kind) {
-                show(" ", "code", code);
-                show(" ", "columnNumber", columnNumber);
-                show(" ", "endPosition", endPosition);
-                show(" ", "kind", kind);
-                show(" ", "lineNumber", lineNumber);
-                show(" ", "position", position);
-                show(" ", "source", source.getName());
-                show(" ", "startPosition", startPosition);
-                // show(" ", "message", message);
-
-                System.out.println();
+                errorCount++;
                 System.out.println(diagnostic);
                 System.out.println();
-                break;
+                if (errorCount >= 5) {
+                    break;
+                }
             }
         }
 
