@@ -4,13 +4,19 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.reflect.Method;
+import java.nio.file.CopyOption;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -39,38 +45,51 @@ public class MinimizeCodeBase {
         loadSourcepaths();
         loadFiles();
         loadDependencies();
-        System.out.println("src exists? dst exists? path");
-        for (final Path p : files) {
-            final Path src = sourceFolder.resolve(p);
-            checkRequiredFile(src, "source");
-            final Path dst = destinationFolder.resolve(p);
-            System.out.format("%-11b %-11b %s%n", Files.exists(src), Files.exists(dst),
-                    p);
-            if (!Files.exists(dst)) {
-                Files.createDirectories(dst.getParent());
-                Files.copy(src, dst);
-                System.out.format("copied: %s%n", p);
+        System.out.println();
+
+        if (Files.exists(sourceFolder.resolve("pom.xml"))) {
+            // mvn(sourceFolder, "--version");
+            mvn(sourceFolder, "-q", "dependency:copy-dependencies");
+            System.out.println();
+        }
+
+        copyPaths(sourceFolder, destinationFolder, files, true, null);
+        System.out.println();
+
+        final List<Path> jarsToCopy = new ArrayList<>();
+        final List<Path> jarsNotCopiedDueToNameCollision = new ArrayList<>();
+        final Set<Path> jarNames = new HashSet<>();
+        final List<String> nonJarDependencies = new ArrayList<>();
+        for (final String s : dependencies) {
+            try {
+                final Path maybeJar = Paths.get(s);
+                final Path name = maybeJar.getFileName();
+                if (name.toString().endsWith(".jar")) {
+                    final Path definitelyJar = maybeJar;
+                    if (jarNames.contains(name)) {
+                        jarsNotCopiedDueToNameCollision.add(definitelyJar);
+                    } else {
+                        jarsToCopy.add(definitelyJar);
+                        jarNames.add(name);
+                    }
+                } else {
+                    nonJarDependencies.add(s);
+                }
+            } catch (final InvalidPathException e) {
+                nonJarDependencies.add(s);
             }
         }
+        if (!jarsToCopy.isEmpty()) {
+            Files.createDirectories(jars);
+            copyPaths(sourceFolder, jars, jarsToCopy, false, "jar");
+        }
+
         Files.createDirectories(classOutput);
         System.out.println();
+
         final Iterable<? extends File> sourcepathsAsFiles = asFileIterable(sourcepaths);
         final Iterable<? extends File> filesAsFiles = asFileIterable(
                 files.stream().filter(MinimizeCodeBase::isJavaSource));
-
-        if (Files.exists(sourceFolder.resolve("pom.xml"))) {
-            final ProcessBuilder pb = new ProcessBuilder();
-            pb.inheritIO();
-            pb.directory(sourceFolder.toFile());
-            pb.command("mvn", "dependency:copy-dependencies");
-            final Process proc = pb.start();
-            try {
-                proc.waitFor();
-            } catch (final InterruptedException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
-        }
 
         final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<JavaFileObject>();
         final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
@@ -363,5 +382,82 @@ public class MinimizeCodeBase {
 
     public static void addStringsFromListingToList(final Path listing, final List<String> list) throws IOException {
         list.addAll(streamListing(listing).collect(Collectors.toList()));
+    }
+
+    public static void mvn(final File directory, final String... args) {
+        final ProcessBuilder pb = new ProcessBuilder();
+        pb.inheritIO();
+        pb.directory(directory);
+        final List<String> cmd = new ArrayList<>();
+        cmd.add("mvn");
+        cmd.addAll(Arrays.asList(args));
+        pb.command(cmd);
+        try {
+            final Process proc = pb.start();
+            proc.waitFor();
+        } catch (final InterruptedException | IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+    }
+
+    public static void mvn(final Path directory, final String... args) {
+        mvn(directory.toFile(), args);
+    }
+
+    /**
+     * @param sourceFolder
+     * @param destinationFolder
+     * @param sourcePaths                relative to sourceFolder
+     * @param preserveDestinationParents maintain intermedate folders between
+     *                                   destinationFolder and copied file,
+     *                                   otherwise place file directly in
+     *                                   destinationFolder
+     * @param descriptionSuffix
+     * @param copyOptions                used by
+     *                                   {@see java.nio.file.Files#copy(Path, Path,
+     *                                   CopyOption...)}
+     * @return destination paths that were actually copied
+     * @throws IOException
+     */
+    public static Iterable<? extends Path> copyPaths(final Path sourceFolder, final Path destinationFolder,
+            final Collection<? extends Path> sourcePaths, final boolean preserveDestinationParents,
+            final String descriptionSuffix, final CopyOption... copyOptions) throws IOException {
+        final List<Path> copied = new ArrayList<>(sourcePaths.size());
+
+        String srcDesc = "source";
+        String dstDesc = "destination";
+        if (!(null == descriptionSuffix || "".equals(descriptionSuffix))) {
+            srcDesc += " " + descriptionSuffix;
+            dstDesc += " " + descriptionSuffix;
+        }
+        final boolean replaceExisting = Arrays.stream(copyOptions)
+                .anyMatch(o -> StandardCopyOption.REPLACE_EXISTING == o);
+
+        System.out.println("ecp  path");
+        for (final Path src : sourcePaths) {
+            final Path resolvedSrc = sourceFolder.resolve(src);
+            checkRequiredFile(resolvedSrc, srcDesc);
+
+            final Path dst = preserveDestinationParents ? src : src.getFileName();
+            final Path resolvedDst = destinationFolder.resolve(dst);
+            checkRegularFile(resolvedDst, dstDesc);
+            final boolean dstAlreadyExists = Files.exists(resolvedDst);
+
+            final boolean shouldCopy = replaceExisting || !dstAlreadyExists;
+            final boolean shouldCreateParents = preserveDestinationParents && !dstAlreadyExists;
+
+            System.out.format("%c%c%c  %s%n", dstAlreadyExists ? 'e' : '.', shouldCopy ? 'c' : '.',
+                    shouldCreateParents ? 'p' : '.', src);
+            if (!shouldCopy) {
+                continue;
+            }
+            if (shouldCreateParents) {
+                Files.createDirectories(resolvedDst.getParent());
+            }
+            Files.copy(resolvedSrc, resolvedDst, copyOptions);
+            copied.add(dst);
+        }
+        return copied;
     }
 }
