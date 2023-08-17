@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -58,7 +58,7 @@ public class MinimizeCodeBase {
 
         final List<Path> jarsToCopy = new ArrayList<>();
         final List<Path> jarsNotCopiedDueToNameCollision = new ArrayList<>();
-        final Set<Path> jarNames = new HashSet<>();
+        final Set<Path> jarNames = new LinkedHashSet<>();
         final List<String> nonJarDependencies = new ArrayList<>();
         for (final String s : dependencies) {
             try {
@@ -90,6 +90,7 @@ public class MinimizeCodeBase {
         final Iterable<? extends File> sourcepathsAsFiles = asFileIterable(sourcepaths);
         final Iterable<? extends File> filesAsFiles = asFileIterable(
                 files.stream().filter(MinimizeCodeBase::isJavaSource));
+        final Iterable<? extends File> jarsAsFiles = asFileIterable(jarNames.stream().map(jars::resolve));
 
         final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<JavaFileObject>();
         final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
@@ -97,6 +98,10 @@ public class MinimizeCodeBase {
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT,
                 Collections.singletonList(classOutput.toFile()));
         fileManager.setLocation(StandardLocation.SOURCE_PATH, sourcepathsAsFiles);
+        if (!jarNames.isEmpty()) {
+            fileManager.setLocation(StandardLocation.CLASS_PATH, jarsAsFiles);
+        }
+
         final Iterable<? extends JavaFileObject> javaFiles = fileManager.getJavaFileObjectsFromFiles(filesAsFiles);
         final CompilationTask task = compiler.getTask(null, fileManager, diagnostics,
                 null, null, javaFiles);
@@ -116,20 +121,20 @@ public class MinimizeCodeBase {
             final long startPosition = diagnostic.getStartPosition();
 
             if (Diagnostic.Kind.ERROR == kind) {
-                if ("compiler.err.doesnt.exist".equals(code)) {
-                    System.out.println(message);
-                } else {
-                    show(" ", "code", code);
-                    show(" ", "columnNumber", columnNumber);
-                    show(" ", "endPosition", endPosition);
-                    show(" ", "kind", kind);
-                    show(" ", "lineNumber", lineNumber);
-                    show(" ", "message", message);
-                    show(" ", "position", position);
-                    show(" ", "source", source);
-                    show(" ", "startPosition", startPosition);
-                    break;
-                }
+                show(" ", "code", code);
+                show(" ", "columnNumber", columnNumber);
+                show(" ", "endPosition", endPosition);
+                show(" ", "kind", kind);
+                show(" ", "lineNumber", lineNumber);
+                show(" ", "position", position);
+                show(" ", "source", source.getName());
+                show(" ", "startPosition", startPosition);
+                // show(" ", "message", message);
+
+                System.out.println();
+                System.out.println(diagnostic);
+                System.out.println();
+                break;
             }
         }
 
@@ -365,7 +370,7 @@ public class MinimizeCodeBase {
     }
 
     public static Stream<? extends String> streamListing(final Path p) throws IOException {
-        return Files.lines(p, UTF_8).filter(MinimizeCodeBase::isNotCommentLine);
+        return Files.lines(p, UTF_8).filter(MinimizeCodeBase::isNotCommentLine).filter(s -> !"".equals(s.trim()));
     }
 
     public static boolean isCommentLine(final String s) {
