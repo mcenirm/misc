@@ -17,6 +17,8 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -111,15 +113,50 @@ public class MinimizeCodeBase {
         }
 
         int errorCount = 0;
+        JavaFileObject previousSource = null;
         for (final Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
             final Diagnostic.Kind kind = diagnostic.getKind();
             if (Diagnostic.Kind.ERROR == kind) {
                 errorCount++;
-                System.out.println(diagnostic);
-                System.out.println();
+                final JavaFileObject source = diagnostic.getSource();
+                if (null != previousSource && !previousSource.equals(source)) {
+                    break;
+                }
+                final String code = diagnostic.getCode();
+                boolean handled = false;
+                if ("compiler.err.cant.resolve.location".equals(code)) {
+                    final String message = diagnostic.getMessage(null);
+                    final Matcher match = ERR_CANT_RESOLVE_LOCATION_MATCH_TYPE_SYMBOL_PACKAGE.matcher(message);
+                    if (match.matches()) {
+                        final String missing_symbol_type = match.group(1);
+                        final String missing_symbol_name = match.group(2);
+                        final String package_name = match.group(3);
+                        if ("class".equals(missing_symbol_type)) {
+                            System.out.println(".../" + package_name.replaceAll("\\.", "/") + "/" + missing_symbol_name
+                                    + JavaFileObject.Kind.SOURCE.extension);
+                            handled = true;
+                            errorCount--;
+                        } else {
+                            System.out.println("----------");
+                            show("code", code);
+                            show("type", missing_symbol_type);
+                            show("symbol", missing_symbol_name);
+                            show("package", package_name);
+                            System.out.println(diagnostic);
+                            handled = true;
+                        }
+                    }
+                }
+                if (!handled) {
+                    System.out.println("----------");
+                    show("code", code);
+                    System.out.println(diagnostic);
+                    System.out.println();
+                }
                 if (errorCount >= 5) {
                     break;
                 }
+                previousSource = source;
             }
         }
 
@@ -449,5 +486,53 @@ public class MinimizeCodeBase {
             copied.add(dst);
         }
         return copied;
+    }
+
+    public static final String JAVA_IDENTIFIER_REGEX = "\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*";
+    public static final Pattern ERR_CANT_RESOLVE_LOCATION_MATCH_TYPE_SYMBOL_PACKAGE = Pattern.compile(
+            "cannot find symbol\\s+symbol:\\s+(class)\\s+("
+                    + JAVA_IDENTIFIER_REGEX
+                    + ")\\s+location:\\s+package\\s+("
+                    + JAVA_IDENTIFIER_REGEX
+                    + "(\\."
+                    + JAVA_IDENTIFIER_REGEX
+                    + ")*)",
+            Pattern.MULTILINE);
+
+    public static String escape(final String s) {
+        final StringBuilder b = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            final char c = s.charAt(i);
+            switch (c) {
+                case '\b':
+                    b.append("\\b");
+                    break;
+                case '\t':
+                    b.append("\\t");
+                    break;
+                case '\n':
+                    b.append("\\n");
+                    break;
+                case '\f':
+                    b.append("\\f");
+                    break;
+                case '\r':
+                    b.append("\\r");
+                    break;
+                case '\"':
+                    b.append("\\\"");
+                    break;
+                case '\'':
+                    b.append("\\\'");
+                    break;
+                case '\\':
+                    b.append("\\\\");
+                    break;
+                default:
+                    b.append(c);
+                    break;
+            }
+        }
+        return b.toString();
     }
 }
