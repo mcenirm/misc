@@ -118,36 +118,54 @@ public class MinimizeCodeBase {
             final Diagnostic.Kind kind = diagnostic.getKind();
             if (Diagnostic.Kind.ERROR == kind) {
                 errorCount++;
+                String guessJavaFile = null;
                 final JavaFileObject source = diagnostic.getSource();
                 if (null != previousSource && !previousSource.equals(source)) {
                     break;
                 }
                 final String code = diagnostic.getCode();
                 boolean handled = false;
+                final String message = diagnostic.getMessage(null);
                 if ("compiler.err.cant.resolve.location".equals(code)) {
-                    final String message = diagnostic.getMessage(null);
                     final Matcher match = ERR_CANT_RESOLVE_LOCATION_MATCH_TYPE_SYMBOL_PACKAGE.matcher(message);
                     if (match.matches()) {
-                        final String missing_symbol_type = match.group(1);
-                        final String missing_symbol_name = match.group(2);
-                        final String package_name = match.group(3);
-                        if ("class".equals(missing_symbol_type)) {
-                            System.out.println(".../" + package_name.replaceAll("\\.", "/") + "/" + missing_symbol_name
-                                    + JavaFileObject.Kind.SOURCE.extension);
-                            handled = true;
-                            errorCount--;
+                        final String type = match.group(GROUP_KEYWORD);
+                        final String symbol = match.group(GROUP_SYMBOL);
+                        final String package_ = match.group(GROUP_PACKAGE);
+                        if ("class".equals(type)) {
+                            guessJavaFile = qualifiedNameToJavaFile(package_, symbol);
                         } else {
                             System.out.println("----------");
                             show("code", code);
-                            show("type", missing_symbol_type);
-                            show("symbol", missing_symbol_name);
-                            show("package", package_name);
+                            show("type", type);
+                            show("symbol", symbol);
+                            show("package", package_);
                             System.out.println(diagnostic);
                             handled = true;
                         }
                     }
+                } else if ("compiler.err.doesnt.exist".equals(code)) {
+                    final String diagnosticString = diagnostic.toString();
+                    final Matcher match = ERR_DOESNT_EXIST_MATCH_IMPORT.matcher(diagnosticString);
+                    if (match.find()) {
+                        // final String package_ = match.group(GROUP_PACKAGE);
+                        final String typename = match.group(GROUP_TYPENAME);
+                        guessJavaFile = qualifiedNameToJavaFile(typename);
+                    } else {
+                        System.out.println("----------");
+                        show("source", source.getName());
+                        System.out.println("-----");
+                        System.out.println(diagnostic);
+                        System.out.println("-----");
+                        System.out.println(escape(diagnosticString));
+                        System.out.println("-----");
+                        handled = true;
+                    }
                 }
-                if (!handled) {
+                if (null != guessJavaFile) {
+                    System.out.println(".../" + guessJavaFile);
+                    errorCount--;
+                } else if (!handled) {
                     System.out.println("----------");
                     show("code", code);
                     System.out.println(diagnostic);
@@ -489,18 +507,49 @@ public class MinimizeCodeBase {
     }
 
     public static final String JAVA_IDENTIFIER_REGEX = "\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*";
+    public static final String JAVA_PACKAGE_REGEX = JAVA_IDENTIFIER_REGEX
+            + "(?:\\."
+            + JAVA_IDENTIFIER_REGEX
+            + ")*";;
+
+    public static final String GROUP_KEYWORD = "keyword";
+    public static final String GROUP_PACKAGE = "package";
+    public static final String GROUP_SYMBOL = "symbol";
+    public static final String GROUP_TYPENAME = "typename";
+
     public static final Pattern ERR_CANT_RESOLVE_LOCATION_MATCH_TYPE_SYMBOL_PACKAGE = Pattern.compile(
-            "cannot find symbol\\s+symbol:\\s+(class)\\s+("
+            "cannot find symbol\\s+symbol:\\s+(?<"
+                    + GROUP_KEYWORD
+                    + ">class)\\s+(?<"
+                    + GROUP_SYMBOL
+                    + ">"
                     + JAVA_IDENTIFIER_REGEX
-                    + ")\\s+location:\\s+package\\s+("
+                    + ")\\s+location:\\s+package\\s+(?<"
+                    + GROUP_PACKAGE
+                    + ">"
+                    + JAVA_PACKAGE_REGEX
+                    + ")",
+            Pattern.MULTILINE);
+
+    public static final Pattern ERR_DOESNT_EXIST_MATCH_IMPORT = Pattern.compile(
+            "\\spackage\\s+(?<"
+                    + GROUP_PACKAGE
+                    + ">"
+                    + JAVA_PACKAGE_REGEX
+                    + ")\\s+does\\s+not\\s+exist\\s+import\\s+(?<"
+                    + GROUP_TYPENAME
+                    + ">\\k<"
+                    + GROUP_PACKAGE
+                    + ">\\."
                     + JAVA_IDENTIFIER_REGEX
-                    + "(\\."
-                    + JAVA_IDENTIFIER_REGEX
-                    + ")*)",
+                    + ")\\s*;\\s",
             Pattern.MULTILINE);
 
     public static String escape(final String s) {
-        final StringBuilder b = new StringBuilder();
+        if (null == s) {
+            return null;
+        }
+        final StringBuilder b = new StringBuilder("\"");
         for (int i = 0; i < s.length(); i++) {
             final char c = s.charAt(i);
             switch (c) {
@@ -533,6 +582,27 @@ public class MinimizeCodeBase {
                     break;
             }
         }
+        b.append("\"");
         return b.toString();
+    }
+
+    public static String qualifedNameToFolders(final String name, final String... more) {
+        if (null == name || Arrays.stream(more).anyMatch(s -> null == s)) {
+            return null;
+        }
+        final StringBuilder b = new StringBuilder(name.replace('.', '/'));
+        for (int i = 0; i < more.length; i++) {
+            b.append('/');
+            b.append(more[i].replace('.', '/'));
+        }
+        return b.toString();
+    }
+
+    public static String qualifiedNameToJavaFile(final String name, final String... more) {
+        final String base = qualifedNameToFolders(name, more);
+        if (null == base) {
+            return null;
+        }
+        return base + JavaFileObject.Kind.SOURCE.extension;
     }
 }
