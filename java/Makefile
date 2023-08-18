@@ -26,7 +26,7 @@ usage:
 all : $(BASH_FILES)
 
 %.class : %.java
-	$(RM) -v -- $@ $(wildcard $*$$*.class)
+	$(RM) -v -- $@ $(foreach f,$(wildcard $*$$*.class),'$(f)')
 	$(JAVAC) $<
 
 %.bash : %.class Makefile
