@@ -14,8 +14,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -44,25 +46,25 @@ public class MinimizeCodeBase {
     }
 
     public void run() throws IOException {
-        loadSourcepaths();
-        loadFiles();
-        loadDependencies();
+        this.loadSourcepaths();
+        this.loadFiles();
+        this.loadDependencies();
         System.out.println();
 
-        if (Files.exists(sourceFolder.resolve("pom.xml"))) {
+        if (Files.exists(this.sourceFolder.resolve("pom.xml"))) {
             // mvn(sourceFolder, "--version");
-            mvn(sourceFolder, "-q", "dependency:copy-dependencies");
+            mvn(this.sourceFolder, "-q", "dependency:copy-dependencies");
             System.out.println();
         }
 
-        copyPaths(sourceFolder, destinationFolder, files, true, null);
+        copyPaths(this.sourceFolder, this.destinationFolder, this.files, true, null);
         System.out.println();
 
         final List<Path> jarsToCopy = new ArrayList<>();
         final List<Path> jarsNotCopiedDueToNameCollision = new ArrayList<>();
         final Set<Path> jarNames = new LinkedHashSet<>();
         final List<String> nonJarDependencies = new ArrayList<>();
-        for (final String s : dependencies) {
+        for (final String s : this.dependencies) {
             try {
                 final Path maybeJar = Paths.get(s);
                 final Path name = maybeJar.getFileName();
@@ -82,31 +84,30 @@ public class MinimizeCodeBase {
             }
         }
         if (!jarsToCopy.isEmpty()) {
-            Files.createDirectories(jars);
-            copyPaths(sourceFolder, jars, jarsToCopy, false, "jar");
+            Files.createDirectories(this.jars);
+            copyPaths(this.sourceFolder, this.jars, jarsToCopy, false, "jar");
         }
 
-        Files.createDirectories(classOutput);
+        Files.createDirectories(this.classOutput);
         System.out.println();
 
-        final Iterable<? extends File> sourcepathsAsFiles = asFileIterable(sourcepaths);
-        final Iterable<? extends File> filesAsFiles = asFileIterable(
-                files.stream().filter(MinimizeCodeBase::isJavaSource));
-        final Iterable<? extends File> jarsAsFiles = asFileIterable(jarNames.stream().map(jars::resolve));
+        final Iterable<? extends File> sourcepathsAsFiles = asFileIterable(this.sourcepaths);
+        final Iterable<? extends File> filesAsFiles = asFileIterable(this.javaFiles);
+        final Iterable<? extends File> jarsAsFiles = asFileIterable(jarNames.stream().map(this.jars::resolve));
 
         final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<JavaFileObject>();
         final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         final StandardJavaFileManager fileManager = compiler.getStandardFileManager(diagnostics, null, UTF_8);
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT,
-                Collections.singletonList(classOutput.toFile()));
+                Collections.singletonList(this.classOutput.toFile()));
         fileManager.setLocation(StandardLocation.SOURCE_PATH, sourcepathsAsFiles);
         if (!jarNames.isEmpty()) {
             fileManager.setLocation(StandardLocation.CLASS_PATH, jarsAsFiles);
         }
 
-        final Iterable<? extends JavaFileObject> javaFiles = fileManager.getJavaFileObjectsFromFiles(filesAsFiles);
-        final CompilationTask task = compiler.getTask(null, fileManager, diagnostics,
-                null, null, javaFiles);
+        final Iterable<? extends JavaFileObject> javaFileObjects = fileManager
+                .getJavaFileObjectsFromFiles(filesAsFiles);
+        final CompilationTask task = compiler.getTask(null, fileManager, diagnostics, null, null, javaFileObjects);
         if (!task.call()) {
             System.out.println("compilation failed");
             System.out.println();
@@ -182,16 +183,32 @@ public class MinimizeCodeBase {
     }
 
     protected void loadSourcepaths() throws IOException {
-        addPathsFromListingToList(sourcepathsListing, sourcepaths);
+        addPathsFromListingToList(this.sourcepathsListing, this.sourcepaths);
     }
 
     protected void loadFiles() throws IOException {
-        addPathsFromListingToList(filesListing, files);
+        addPathsFromListingToList(this.filesListing, this.files);
+        this.javaFiles = this.files.stream().filter(MinimizeCodeBase::isJavaSource).collect(Collectors.toList());
+        for (final Path javaFile : this.javaFiles) {
+            final List<Path> parentSourcepaths = this.sourcepaths.stream().filter(sp -> javaFile.startsWith(sp))
+                    .collect(Collectors.toList());
+            if (parentSourcepaths.size() < 1) {
+                throw new IllegalArgumentException(String.format("no sourcepath for java file: %s", javaFile));
+            } else if (parentSourcepaths.size() > 1) {
+                System.out.println("Multiple matching sourcepaths for java file");
+                show("  ", "java file", javaFile);
+                show("  ", "sourcepaths", parentSourcepaths.size());
+                for (final Path p : parentSourcepaths) {
+                    show("    ", "", p);
+                }
+                System.out.println();
+            }
+        }
     }
 
     protected void loadDependencies() throws IOException {
-        if (Files.exists(dependenciesListing)) {
-            addStringsFromListingToList(dependenciesListing, dependencies);
+        if (Files.exists(this.dependenciesListing)) {
+            addStringsFromListingToList(this.dependenciesListing, this.dependencies);
         }
     }
 
@@ -209,15 +226,17 @@ public class MinimizeCodeBase {
         this.sourceFolder = sourceFolder;
         this.destinationFolder = destinationFolder;
 
-        this.sourcepathsListing = resolveRequiredListing("sourcepaths");
-        this.filesListing = resolveRequiredListing("files");
-        this.dependenciesListing = resolveOptionalListing("dependencies");
-        this.classOutput = resolveOutputFolder("classes", "class output");
-        this.jars = resolveOutputFolder("jars");
+        this.sourcepathsListing = this.resolveRequiredListing("sourcepaths");
+        this.filesListing = this.resolveRequiredListing("files");
+        this.dependenciesListing = this.resolveOptionalListing("dependencies");
+        this.classOutput = this.resolveOutputFolder("classes", "class output");
+        this.jars = this.resolveOutputFolder("jars");
 
         this.sourcepaths = new ArrayList<>();
         this.files = new ArrayList<>();
         this.dependencies = new ArrayList<>();
+
+        this.sourcepathForJavaFile = new HashMap<>();
     }
 
     protected Path sourceFolder;
@@ -229,7 +248,9 @@ public class MinimizeCodeBase {
     protected Path jars;
     protected List<Path> sourcepaths;
     protected List<Path> files;
+    protected List<Path> javaFiles;
     protected List<String> dependencies;
+    protected Map<Path, Path> sourcepathForJavaFile;
 
     public static MinimizeCodeBase fromCommandLine(final String[] args) throws IOException {
         int i = 0;
@@ -267,25 +288,25 @@ public class MinimizeCodeBase {
     }
 
     protected Path resolveRequiredListing(final String basename) throws IOException {
-        return resolveAndCheckListing(basename, true);
+        return this.resolveAndCheckListing(basename, true);
     }
 
     protected Path resolveOptionalListing(final String basename) throws IOException {
-        return resolveAndCheckListing(basename, false);
+        return this.resolveAndCheckListing(basename, false);
     }
 
     protected Path resolveOutputFolder(final String name, final String description) {
-        final Path p = destinationFolder.resolve(name);
+        final Path p = this.destinationFolder.resolve(name);
         return p;
     }
 
     protected Path resolveOutputFolder(final String name) {
-        return resolveOutputFolder(name, name);
+        return this.resolveOutputFolder(name, name);
     }
 
     protected Path resolveAndCheckListing(final String basename, final String description, final boolean required)
             throws IOException {
-        final Path p = destinationFolder.resolve(basename + ".lst");
+        final Path p = this.destinationFolder.resolve(basename + ".lst");
         if (required) {
             checkRequiredFile(p, description);
         } else {
@@ -296,7 +317,11 @@ public class MinimizeCodeBase {
     }
 
     protected Path resolveAndCheckListing(final String basename, final boolean required) throws IOException {
-        return resolveAndCheckListing(basename, basename + " listing", required);
+        return this.resolveAndCheckListing(basename, basename + " listing", required);
+    }
+
+    protected Path getSourcepathForJavaFile(final Path javaFile) {
+        return this.sourcepathForJavaFile.get(javaFile);
     }
 
     public static void checkRequiredFile(final Path p, final String description) throws IOException {
@@ -453,7 +478,7 @@ public class MinimizeCodeBase {
     /**
      * @param sourceFolder
      * @param destinationFolder
-     * @param sourcePaths                relative to sourceFolder
+     * @param sources                    relative to sourceFolder
      * @param preserveDestinationParents maintain intermedate folders between
      *                                   destinationFolder and copied file,
      *                                   otherwise place file directly in
@@ -466,9 +491,9 @@ public class MinimizeCodeBase {
      * @throws IOException
      */
     public static Iterable<? extends Path> copyPaths(final Path sourceFolder, final Path destinationFolder,
-            final Collection<? extends Path> sourcePaths, final boolean preserveDestinationParents,
+            final Collection<? extends Path> sources, final boolean preserveDestinationParents,
             final String descriptionSuffix, final CopyOption... copyOptions) throws IOException {
-        final List<Path> copied = new ArrayList<>(sourcePaths.size());
+        final List<Path> copied = new ArrayList<>(sources.size());
 
         String srcDesc = "source";
         String dstDesc = "destination";
@@ -480,7 +505,7 @@ public class MinimizeCodeBase {
                 .anyMatch(o -> StandardCopyOption.REPLACE_EXISTING == o);
 
         System.out.println("ecp  path");
-        for (final Path src : sourcePaths) {
+        for (final Path src : sources) {
             final Path resolvedSrc = sourceFolder.resolve(src);
             checkRequiredFile(resolvedSrc, srcDesc);
 
