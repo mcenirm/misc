@@ -26,10 +26,11 @@ usage:
 all : $(BASH_FILES)
 
 %.class : %.java
+	$(RM) -v -- $@ $(wildcard $*$$*.class)
 	$(JAVAC) $<
 
 %.bash : %.class Makefile
-	echo '$(PREFACE) $(JAVA) -cp $(PWD) $(basename $<) "$$@"' > $@
+	echo '$(PREFACE) $(JAVA) -cp $(PWD) $* "$$@"' > $@
 	chmod +x $@
 
 .PRECIOUS : %.class
