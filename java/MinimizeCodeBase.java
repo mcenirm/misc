@@ -16,6 +16,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -116,56 +117,37 @@ public class MinimizeCodeBase {
 
         int errorCount = 0;
         JavaFileObject previousSource = null;
-        for (final Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
-            final Diagnostic.Kind kind = diagnostic.getKind();
-            if (Diagnostic.Kind.ERROR == kind) {
+        for (final Diagnostic<? extends JavaFileObject> diag : diagnostics.getDiagnostics()) {
+            if (Diagnostic.Kind.ERROR == diag.getKind()) {
                 errorCount++;
-                String guessJavaFile = null;
-                String guessPackage = null;
-                final JavaFileObject source = diagnostic.getSource();
+                final JavaFileObject source = diag.getSource();
                 if (null != previousSource && !previousSource.equals(source)) {
                     break;
                 }
-                final String code = diagnostic.getCode();
-                boolean handled = false;
-                final String message = diagnostic.getMessage(null);
-                if ("compiler.err.cant.resolve.location".equals(code)) {
-                    final Matcher match = ERR_CANT_RESOLVE_LOCATION_MATCH_TYPE_SYMBOL_PACKAGE.matcher(message);
-                    if (match.matches()) {
-                        final String type = match.group(GROUP_KEYWORD);
-                        final String symbol = match.group(GROUP_SYMBOL);
-                        final String package_ = match.group(GROUP_PACKAGE);
-                        if ("class".equals(type)) {
-                            guessJavaFile = qualifiedNameToJavaFile(package_, symbol);
-                            guessPackage = package_;
-                        } else {
-                            System.out.println("----------");
-                            show("code", code);
-                            show("type", type);
-                            show("symbol", symbol);
-                            show("package", package_);
-                            System.out.println(diagnostic);
-                            handled = true;
-                        }
+
+                String guessJavaFile = null;
+                String guessPackage = null;
+                MinimizeCodeBase.DecodedDiagnostic dd = null;
+                final Iterator<MinimizeCodeBase.DecodedDiagnostic> ddIter = decodeDiagnostic(diag).iterator();
+                while (ddIter.hasNext()) {
+                    dd = ddIter.next();
+                    if (COMPILER_ERR_CANT_RESOLVE_LOCATION.equals(dd.code) && "class".equals(dd.keyword)
+                            && null != dd.packageName && null != dd.symbol) {
+                        guessJavaFile = qualifiedNameToJavaFile(dd.packageName, dd.symbol);
+                        guessPackage = dd.packageName;
+                    } else if (COMPILER_ERR_DOESNT_EXIST.equals(dd.code) && null != dd.packageName
+                            && null != dd.typename) {
+                        guessJavaFile = qualifiedNameToJavaFile(dd.typename);
+                        guessPackage = dd.packageName;
                     }
-                } else if ("compiler.err.doesnt.exist".equals(code)) {
-                    final String diagnosticString = diagnostic.toString();
-                    final Matcher match = ERR_DOESNT_EXIST_MATCH_IMPORT.matcher(diagnosticString);
-                    if (match.find()) {
-                        guessPackage = match.group(GROUP_PACKAGE);
-                        guessJavaFile = qualifiedNameToJavaFile(match.group(GROUP_TYPENAME));
-                    } else {
-                        System.out.println("----------");
-                        show("source", source.getName());
-                        System.out.println("-----");
-                        System.out.println(diagnostic);
-                        System.out.println("-----");
-                        System.out.println(escape(diagnosticString));
-                        System.out.println("-----");
-                        handled = true;
+                    if (null != guessJavaFile) {
+                        break;
                     }
                 }
+
                 if (null != guessJavaFile) {
+                    // System.out.println("----------");
+                    // dd.show();
                     final Path guessAsPath = Paths.get(guessJavaFile);
                     if (null == guessPackage) {
                         guessPackage = this.getPackageForJavaFile(guessAsPath);
@@ -180,10 +162,10 @@ public class MinimizeCodeBase {
                     }
                     System.out.println(guessSourcepath + "/" + guessJavaFile);
                     errorCount--;
-                } else if (!handled) {
+                } else {
                     System.out.println("----------");
-                    show("code", code);
-                    System.out.println(diagnostic);
+                    show("code", diag.getCode());
+                    System.out.println(diag);
                     System.out.println();
                 }
                 if (errorCount >= 5) {
@@ -579,6 +561,7 @@ public class MinimizeCodeBase {
     public static final String GROUP_SYMBOL = "symbol";
     public static final String GROUP_TYPENAME = "typename";
 
+    public static final String COMPILER_ERR_CANT_RESOLVE_LOCATION = "compiler.err.cant.resolve.location";
     public static final Pattern ERR_CANT_RESOLVE_LOCATION_MATCH_TYPE_SYMBOL_PACKAGE = Pattern.compile(
             "cannot find symbol\\s+symbol:\\s+(?<"
                     + GROUP_KEYWORD
@@ -593,6 +576,7 @@ public class MinimizeCodeBase {
                     + ")",
             Pattern.MULTILINE);
 
+    private static final String COMPILER_ERR_DOESNT_EXIST = "compiler.err.doesnt.exist";
     public static final Pattern ERR_DOESNT_EXIST_MATCH_IMPORT = Pattern.compile(
             "\\spackage\\s+(?<"
                     + GROUP_PACKAGE
@@ -606,6 +590,88 @@ public class MinimizeCodeBase {
                     + JAVA_IDENTIFIER_REGEX
                     + ")\\s*;\\s",
             Pattern.MULTILINE);
+
+    public static final Map<String, List<Pattern>> PATTERNS_FOR_COMPILER_ERR;
+    static {
+        final Map<String, List<Pattern>> m = new LinkedHashMap<>();
+        List<Pattern> temp;
+
+        temp = new ArrayList<>();
+        temp.add(ERR_CANT_RESOLVE_LOCATION_MATCH_TYPE_SYMBOL_PACKAGE);
+        m.put(COMPILER_ERR_CANT_RESOLVE_LOCATION, temp);
+
+        temp = new ArrayList<>();
+        temp.add(ERR_DOESNT_EXIST_MATCH_IMPORT);
+        m.put(COMPILER_ERR_DOESNT_EXIST, temp);
+
+        PATTERNS_FOR_COMPILER_ERR = Collections.unmodifiableMap(m);
+    }
+
+    static class DecodedDiagnostic {
+        public Diagnostic<? extends JavaFileObject> diag;
+        public String err;
+        public String matched;
+        public String code;
+        public String keyword;
+        public String packageName;
+        public String symbol;
+        public String typename;
+
+        public DecodedDiagnostic(final Diagnostic<? extends JavaFileObject> diag, final String err,
+                final String matched, final String code, final String keyword,
+                final String packageName, final String symbol, final String typename) {
+            this.diag = diag;
+            this.err = err;
+            this.matched = matched;
+            this.code = code;
+            this.keyword = keyword;
+            this.packageName = packageName;
+            this.symbol = symbol;
+            this.typename = typename;
+        }
+
+        public void show() {
+            MinimizeCodeBase.show("err", this.err);
+            MinimizeCodeBase.show("matched", this.matched);
+            MinimizeCodeBase.show("code", this.code);
+            MinimizeCodeBase.show("keyword", this.keyword);
+            MinimizeCodeBase.show("packageName", this.packageName);
+            MinimizeCodeBase.show("symbol", this.symbol);
+            MinimizeCodeBase.show("typename", this.typename);
+        }
+    }
+
+    public static List<DecodedDiagnostic> decodeDiagnostic(final Diagnostic<? extends JavaFileObject> diag) {
+        final ArrayList<MinimizeCodeBase.DecodedDiagnostic> details = new ArrayList<>();
+        final String[] strs = { diag.getMessage(null), diag.toString() };
+        for (final String err : PATTERNS_FOR_COMPILER_ERR.keySet()) {
+            for (final Pattern pat : PATTERNS_FOR_COMPILER_ERR.get(err)) {
+                for (final String s : strs) {
+                    final Matcher m = pat.matcher(s);
+                    if (m.find()) {
+                        details.add(new DecodedDiagnostic(
+                                diag,
+                                err,
+                                s,
+                                diag.getCode(),
+                                valueOfNamedGroup(m, GROUP_KEYWORD),
+                                valueOfNamedGroup(m, GROUP_PACKAGE),
+                                valueOfNamedGroup(m, GROUP_SYMBOL),
+                                valueOfNamedGroup(m, GROUP_TYPENAME)));
+                    }
+                }
+            }
+        }
+        return details;
+    }
+
+    public static String valueOfNamedGroup(final Matcher m, final String n) {
+        try {
+            return m.group(n);
+        } catch (final IllegalArgumentException e) {
+            return null;
+        }
+    }
 
     public static String escape(final String s) {
         if (null == s) {
@@ -687,9 +753,6 @@ public class MinimizeCodeBase {
  * offer suggestions for jar dependencies (use `javap` to see if missing class
  * is in other jars in same source folder as an existing jar)
  * 
- * build nested map of diagnostic interpretations and guesses for each code
- * ( code -> list of methods? )
- *
  * instead of printing each suggestion to System.out directly, return list of
  * suggestions, and then format all at once
  * 
