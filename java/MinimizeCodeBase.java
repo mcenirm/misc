@@ -681,3 +681,16 @@ public class MinimizeCodeBase {
         return b.toString();
     }
 }
+/*
+ * TODO vague thoughts about improvement
+ * 
+ * offer suggestions for jar dependencies (use `javap` to see if missing class
+ * is in other jars in same source folder as an existing jar)
+ * 
+ * build nested map of diagnostic interpretations and guesses for each code
+ * ( code -> list of methods? )
+ *
+ * instead of printing each suggestion to System.out directly, return list of
+ * suggestions, and then format all at once
+ * 
+ */
