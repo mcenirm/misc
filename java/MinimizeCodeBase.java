@@ -15,6 +15,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -188,7 +189,7 @@ public class MinimizeCodeBase {
 
     protected void loadFiles() throws IOException {
         addPathsFromListingToList(this.filesListing, this.files);
-        this.javaFiles = this.files.stream().filter(MinimizeCodeBase::isJavaSource).collect(Collectors.toList());
+        this.files.stream().filter(MinimizeCodeBase::isJavaSource).forEachOrdered(this.javaFiles::add);
         for (final Path javaFile : this.javaFiles) {
             final List<Path> parentSourcepaths = this.sourcepaths.stream().filter(sp -> javaFile.startsWith(sp))
                     .collect(Collectors.toList());
@@ -202,6 +203,16 @@ public class MinimizeCodeBase {
                     show("    ", "", p);
                 }
                 System.out.println();
+            } else {
+                final Path sp = parentSourcepaths.get(0);
+                this.sourcepathForJavaFile.put(javaFile, sp);
+                final Path relativePath = sp.relativize(javaFile);
+                final String package_ = foldersToQualifiedName(relativePath.getParent());
+                this.packageForJavaFile.put(javaFile, package_);
+                if (!this.sourcepathsForPackage.containsKey(package_)) {
+                    this.sourcepathsForPackage.put(package_, new LinkedHashSet<>());
+                }
+                this.sourcepathsForPackage.get(package_).add(sp);
             }
         }
     }
@@ -234,9 +245,12 @@ public class MinimizeCodeBase {
 
         this.sourcepaths = new ArrayList<>();
         this.files = new ArrayList<>();
+        this.javaFiles = new ArrayList<>();
         this.dependencies = new ArrayList<>();
 
         this.sourcepathForJavaFile = new HashMap<>();
+        this.packageForJavaFile = new HashMap<>();
+        this.sourcepathsForPackage = new HashMap<>();
     }
 
     protected Path sourceFolder;
@@ -251,6 +265,8 @@ public class MinimizeCodeBase {
     protected List<Path> javaFiles;
     protected List<String> dependencies;
     protected Map<Path, Path> sourcepathForJavaFile;
+    protected Map<Path, String> packageForJavaFile;
+    protected Map<String, Set<Path>> sourcepathsForPackage;
 
     public static MinimizeCodeBase fromCommandLine(final String[] args) throws IOException {
         int i = 0;
@@ -629,5 +645,18 @@ public class MinimizeCodeBase {
             return null;
         }
         return base + JavaFileObject.Kind.SOURCE.extension;
+    }
+
+    public static String foldersToQualifiedName(final Path p) {
+        if (null == p) {
+            return null;
+        }
+        final Iterator<Path> it = p.iterator();
+        final StringBuilder b = new StringBuilder(it.next().toString());
+        while (it.hasNext()) {
+            b.append('.');
+            b.append(it.next().toString());
+        }
+        return b.toString();
     }
 }
