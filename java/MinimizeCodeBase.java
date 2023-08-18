@@ -121,6 +121,7 @@ public class MinimizeCodeBase {
             if (Diagnostic.Kind.ERROR == kind) {
                 errorCount++;
                 String guessJavaFile = null;
+                String guessPackage = null;
                 final JavaFileObject source = diagnostic.getSource();
                 if (null != previousSource && !previousSource.equals(source)) {
                     break;
@@ -136,6 +137,7 @@ public class MinimizeCodeBase {
                         final String package_ = match.group(GROUP_PACKAGE);
                         if ("class".equals(type)) {
                             guessJavaFile = qualifiedNameToJavaFile(package_, symbol);
+                            guessPackage = package_;
                         } else {
                             System.out.println("----------");
                             show("code", code);
@@ -150,9 +152,8 @@ public class MinimizeCodeBase {
                     final String diagnosticString = diagnostic.toString();
                     final Matcher match = ERR_DOESNT_EXIST_MATCH_IMPORT.matcher(diagnosticString);
                     if (match.find()) {
-                        // final String package_ = match.group(GROUP_PACKAGE);
-                        final String typename = match.group(GROUP_TYPENAME);
-                        guessJavaFile = qualifiedNameToJavaFile(typename);
+                        guessPackage = match.group(GROUP_PACKAGE);
+                        guessJavaFile = qualifiedNameToJavaFile(match.group(GROUP_TYPENAME));
                     } else {
                         System.out.println("----------");
                         show("source", source.getName());
@@ -165,7 +166,19 @@ public class MinimizeCodeBase {
                     }
                 }
                 if (null != guessJavaFile) {
-                    System.out.println(".../" + guessJavaFile);
+                    final Path guessAsPath = Paths.get(guessJavaFile);
+                    if (null == guessPackage) {
+                        guessPackage = this.getPackageForJavaFile(guessAsPath);
+                    }
+                    final Set<Path> guessSourcepaths = this.getSourcepathsForPackage(guessPackage);
+                    String guessSourcepath = null;
+                    if (null == guessSourcepaths || guessSourcepaths.isEmpty()) {
+                        guessSourcepath = "...";
+                    } else {
+                        guessSourcepath = guessSourcepaths.iterator().next().toString().replace(File.separatorChar,
+                                '/');
+                    }
+                    System.out.println(guessSourcepath + "/" + guessJavaFile);
                     errorCount--;
                 } else if (!handled) {
                     System.out.println("----------");
@@ -338,6 +351,14 @@ public class MinimizeCodeBase {
 
     protected Path getSourcepathForJavaFile(final Path javaFile) {
         return this.sourcepathForJavaFile.get(javaFile);
+    }
+
+    protected Set<Path> getSourcepathsForPackage(final String p) {
+        return this.sourcepathsForPackage.get(p);
+    }
+
+    protected String getPackageForJavaFile(final Path p) {
+        return this.packageForJavaFile.get(p);
     }
 
     public static void checkRequiredFile(final Path p, final String description) throws IOException {
