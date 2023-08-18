@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -70,7 +71,7 @@ public class MinimizeCodeBase {
             try {
                 final Path maybeJar = Paths.get(s);
                 final Path name = maybeJar.getFileName();
-                if (name.toString().endsWith(".jar")) {
+                if (isJar(name)) {
                     final Path definitelyJar = maybeJar;
                     if (jarNames.contains(name)) {
                         jarsNotCopiedDueToNameCollision.add(definitelyJar);
@@ -115,6 +116,7 @@ public class MinimizeCodeBase {
             System.out.println();
         }
 
+        final Set<Path> suggestedJars = new LinkedHashSet<>();
         int errorCount = 0;
         JavaFileObject previousSource = null;
         for (final Diagnostic<? extends JavaFileObject> diag : diagnostics.getDiagnostics()) {
@@ -154,11 +156,38 @@ public class MinimizeCodeBase {
                     }
                     final Set<Path> guessSourcepaths = this.getSourcepathsForPackage(guessPackage);
                     String guessSourcepath = null;
-                    if (null == guessSourcepaths || guessSourcepaths.isEmpty()) {
-                        guessSourcepath = "...";
+                    if (null != guessSourcepaths && !guessSourcepaths.isEmpty()) {
+                        guessSourcepath = preparePathForListing(guessSourcepaths.iterator().next());
                     } else {
-                        guessSourcepath = guessSourcepaths.iterator().next().toString().replace(File.separatorChar,
-                                '/');
+                        guessSourcepath = "...";
+                        final String typename = dd.typename;
+                        final Optional<Path> alreadyFoundJarWithType = suggestedJars.stream().filter(j -> {
+                            return jarContainsType(j, typename);
+                        }).findFirst();
+                        if (!alreadyFoundJarWithType.isPresent()) {
+                            final Optional<Path> foundJarWithType = jarsToCopy.stream()
+                                    .map(Path::getParent)
+                                    .unordered()
+                                    .distinct()
+                                    .map(this.sourceFolder::resolve)
+                                    .flatMap(parent -> {
+                                        try {
+                                            return Files.find(parent, 1, (file, attr) -> isJar(file));
+                                        } catch (final IOException e) {
+                                            // TODO Auto-generated catch block
+                                            e.printStackTrace();
+                                            return Stream.empty();
+                                        }
+                                    })
+                                    .filter(j -> !jarNames.contains(j.getFileName()))
+                                    .filter(j -> {
+                                        return jarContainsType(j, typename);
+                                    })
+                                    .findFirst();
+                            if (foundJarWithType.isPresent()) {
+                                suggestedJars.add(foundJarWithType.get());
+                            }
+                        }
                     }
                     System.out.println(guessSourcepath + "/" + guessJavaFile);
                     errorCount--;
@@ -172,6 +201,13 @@ public class MinimizeCodeBase {
                     break;
                 }
                 previousSource = source;
+            }
+        }
+
+        if (!suggestedJars.isEmpty()) {
+            System.out.println("-- jar files --");
+            for (final Path jar : suggestedJars) {
+                System.out.println(preparePathForListing(this.sourceFolder.relativize(jar)));
             }
         }
 
@@ -413,6 +449,10 @@ public class MinimizeCodeBase {
 
     public static boolean isJavaSource(final Path p) {
         return p.getFileName().toString().endsWith(JavaFileObject.Kind.SOURCE.extension);
+    }
+
+    public static boolean isJar(final Path p) {
+        return p.getFileName().toString().endsWith(".jar");
     }
 
     public static void inspect(final Object o) {
@@ -746,12 +786,28 @@ public class MinimizeCodeBase {
         }
         return b.toString();
     }
+
+    public static String preparePathForListing(final Path p) {
+        return p.toString().replace(File.separatorChar, '/');
+    }
+
+    public static boolean jarContainsType(final Path jar, final String qualifiedName) {
+        final ProcessBuilder pb = new ProcessBuilder("javap", "-cp", jar.toString(), qualifiedName);
+        try {
+            final Process proc = pb.start();
+            return 0 == proc.waitFor();
+        } catch (final InterruptedException | IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+            return false;
+        }
+    }
 }
 /*
  * TODO vague thoughts about improvement
  * 
- * offer suggestions for jar dependencies (use `javap` to see if missing class
- * is in other jars in same source folder as an existing jar)
+ * offer suggestions for java files by looking at each sourcepath to see if it
+ * already exists
  * 
  * instead of printing each suggestion to System.out directly, return list of
  * suggestions, and then format all at once
