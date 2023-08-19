@@ -116,7 +116,10 @@ public class MinimizeCodeBase {
             System.out.println();
         }
 
+        final Set<Path> suggestedUnresolvedJavaFiles = new LinkedHashSet<>();
+        final Set<Path> suggestedJavaFiles = new LinkedHashSet<>();
         final Set<Path> suggestedJars = new LinkedHashSet<>();
+
         int errorCount = 0;
         JavaFileObject previousSource = null;
         for (final Diagnostic<? extends JavaFileObject> diag : diagnostics.getDiagnostics()) {
@@ -127,7 +130,7 @@ public class MinimizeCodeBase {
                     break;
                 }
 
-                String guessJavaFile = null;
+                Path guessJavaFile = null;
                 String guessPackage = null;
                 MinimizeCodeBase.DecodedDiagnostic dd = null;
                 final Iterator<MinimizeCodeBase.DecodedDiagnostic> ddIter = decodeDiagnostic(diag).iterator();
@@ -150,16 +153,16 @@ public class MinimizeCodeBase {
                 if (null != guessJavaFile) {
                     // System.out.println("----------");
                     // dd.show();
-                    final Path guessAsPath = Paths.get(guessJavaFile);
                     if (null == guessPackage) {
-                        guessPackage = this.getPackageForJavaFile(guessAsPath);
+                        guessPackage = this.getPackageForJavaFile(guessJavaFile);
                     }
                     final Set<Path> guessSourcepaths = this.getSourcepathsForPackage(guessPackage);
-                    String guessSourcepath = null;
-                    if (null != guessSourcepaths && !guessSourcepaths.isEmpty()) {
-                        guessSourcepath = preparePathForListing(guessSourcepaths.iterator().next());
+                    if (!guessSourcepaths.isEmpty()) {
+                        for (final Path guessSourcePath : guessSourcepaths) {
+                            suggestedJavaFiles.add(guessSourcePath.resolve(guessJavaFile));
+                        }
                     } else {
-                        guessSourcepath = "...";
+                        suggestedUnresolvedJavaFiles.add(guessJavaFile);
                         final String typename = dd.typename;
                         final Optional<Path> alreadyFoundJarWithType = suggestedJars.stream().filter(j -> {
                             return jarContainsType(j, typename);
@@ -189,7 +192,6 @@ public class MinimizeCodeBase {
                             }
                         }
                     }
-                    System.out.println(guessSourcepath + "/" + guessJavaFile);
                     errorCount--;
                 } else {
                     System.out.println("----------");
@@ -204,11 +206,28 @@ public class MinimizeCodeBase {
             }
         }
 
-        if (!suggestedJars.isEmpty()) {
-            System.out.println("-- jar files --");
-            for (final Path jar : suggestedJars) {
-                System.out.println(preparePathForListing(this.sourceFolder.relativize(jar)));
+        if (!suggestedUnresolvedJavaFiles.isEmpty()) {
+            System.out.println("-- suggested unresolved java files --");
+            for (final Path unresolvedJavaFile : suggestedUnresolvedJavaFiles) {
+                System.out.println("TBD/" + preparePathForListing(unresolvedJavaFile));
             }
+            System.out.println();
+        }
+
+        if (!suggestedJavaFiles.isEmpty()) {
+            System.out.println("-- suggested java files --");
+            for (final Path javaFile : suggestedJavaFiles) {
+                System.out.println(preparePathForListing(javaFile));
+            }
+            System.out.println();
+        }
+
+        if (!suggestedJars.isEmpty()) {
+            System.out.println("-- suggested jars --");
+            for (final Path jar : suggestedJars) {
+                System.out.println(preparePathForListing(jar));
+            }
+            System.out.println();
         }
 
         fileManager.close();
@@ -372,7 +391,11 @@ public class MinimizeCodeBase {
     }
 
     protected Set<Path> getSourcepathsForPackage(final String p) {
-        return this.sourcepathsForPackage.get(p);
+        final Set<Path> s = this.sourcepathsForPackage.get(p);
+        if (null == s) {
+            return Collections.emptySet();
+        }
+        return s;
     }
 
     protected String getPackageForJavaFile(final Path p) {
@@ -754,24 +777,37 @@ public class MinimizeCodeBase {
         return b.toString();
     }
 
-    public static String qualifedNameToFolders(final String name, final String... more) {
+    public static Path qualifiedNameToPath(final String name, final String... more) {
         if (null == name || Arrays.stream(more).anyMatch(s -> null == s)) {
             return null;
         }
-        final StringBuilder b = new StringBuilder(name.replace('.', '/'));
-        for (int i = 0; i < more.length; i++) {
-            b.append('/');
-            b.append(more[i].replace('.', '/'));
-        }
-        return b.toString();
+        return Paths.get(qualifiedNameToPathString(name),
+                Arrays
+                        .stream(more)
+                        .map(MinimizeCodeBase::qualifiedNameToPathString)
+                        .toArray(String[]::new));
     }
 
-    public static String qualifiedNameToJavaFile(final String name, final String... more) {
-        final String base = qualifedNameToFolders(name, more);
+    public static String qualifiedNameToPathString(final String name) {
+        if (null == name) {
+            return null;
+        }
+        return name.replace('.', File.separatorChar);
+    }
+
+    public static Path qualifiedNameToJavaFile(final String name, final String... more) {
+        final Path base = qualifiedNameToPath(name, more);
         if (null == base) {
             return null;
         }
-        return base + JavaFileObject.Kind.SOURCE.extension;
+        final Path parent = base.getParent();
+        Path fileName = base.getFileName();
+        fileName = Paths.get(fileName.toString() + JavaFileObject.Kind.SOURCE.extension);
+        if (null == parent) {
+            return fileName;
+        } else {
+            return parent.resolve(fileName);
+        }
     }
 
     public static String foldersToQualifiedName(final Path p) {
