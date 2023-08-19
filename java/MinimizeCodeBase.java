@@ -162,33 +162,43 @@ public class MinimizeCodeBase {
                             suggestedJavaFiles.add(guessSourcePath.resolve(guessJavaFile));
                         }
                     } else {
-                        suggestedUnresolvedJavaFiles.add(guessJavaFile);
-                        final String typename = dd.typename;
-                        final Optional<Path> alreadyFoundJarWithType = suggestedJars.stream().filter(j -> {
-                            return jarContainsType(j, typename);
-                        }).findFirst();
-                        if (!alreadyFoundJarWithType.isPresent()) {
-                            final Optional<Path> foundJarWithType = jarsToCopy.stream()
-                                    .map(Path::getParent)
-                                    .unordered()
-                                    .distinct()
-                                    .map(this.sourceFolder::resolve)
-                                    .flatMap(parent -> {
-                                        try {
-                                            return Files.find(parent, 1, (file, attr) -> isJar(file));
-                                        } catch (final IOException e) {
-                                            // TODO Auto-generated catch block
-                                            e.printStackTrace();
-                                            return Stream.empty();
-                                        }
-                                    })
-                                    .filter(j -> !jarNames.contains(j.getFileName()))
-                                    .filter(j -> {
-                                        return jarContainsType(j, typename);
-                                    })
-                                    .findFirst();
-                            if (foundJarWithType.isPresent()) {
-                                suggestedJars.add(foundJarWithType.get());
+                        boolean foundJavaFile = false;
+                        for (final Path sp : this.sourcepaths) {
+                            final Path withSourcepath = sp.resolve(guessJavaFile);
+                            if (Files.exists(this.sourceFolder.resolve(withSourcepath))) {
+                                suggestedJavaFiles.add(withSourcepath);
+                                foundJavaFile = true;
+                            }
+                        }
+                        if (!foundJavaFile) {
+                            suggestedUnresolvedJavaFiles.add(guessJavaFile);
+                            final String typename = dd.typename;
+                            final Optional<Path> alreadyFoundJarWithType = suggestedJars.stream().filter(j -> {
+                                return jarContainsType(j, typename);
+                            }).findFirst();
+                            if (!alreadyFoundJarWithType.isPresent()) {
+                                final Optional<Path> foundJarWithType = jarsToCopy.stream()
+                                        .map(Path::getParent)
+                                        .unordered()
+                                        .distinct()
+                                        .map(this.sourceFolder::resolve)
+                                        .flatMap(parent -> {
+                                            try {
+                                                return Files.find(parent, 1, (file, attr) -> isJar(file));
+                                            } catch (final IOException e) {
+                                                // TODO Auto-generated catch block
+                                                e.printStackTrace();
+                                                return Stream.empty();
+                                            }
+                                        })
+                                        .filter(j -> !jarNames.contains(j.getFileName()))
+                                        .filter(j -> {
+                                            return jarContainsType(j, typename);
+                                        })
+                                        .findFirst();
+                                if (foundJarWithType.isPresent()) {
+                                    suggestedJars.add(foundJarWithType.get());
+                                }
                             }
                         }
                     }
@@ -225,7 +235,7 @@ public class MinimizeCodeBase {
         if (!suggestedJars.isEmpty()) {
             System.out.println("-- suggested jars --");
             for (final Path jar : suggestedJars) {
-                System.out.println(preparePathForListing(jar));
+                System.out.println(preparePathForListing(this.sourceFolder.relativize(jar)));
             }
             System.out.println();
         }
@@ -842,10 +852,7 @@ public class MinimizeCodeBase {
 /*
  * TODO vague thoughts about improvement
  * 
- * offer suggestions for java files by looking at each sourcepath to see if it
- * already exists
- * 
- * instead of printing each suggestion to System.out directly, return list of
- * suggestions, and then format all at once
+ * improve suggestions for each java file by checking if it exists in a known
+ * sourcepath
  * 
  */
