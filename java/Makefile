@@ -25,12 +25,13 @@ usage:
 
 all : $(BASH_FILES)
 
-%.class : %.java
+classes/%.class : %.java
+	[ -d classes ] || mkdir classes
 	$(RM) -v -- $@ $(foreach f,$(wildcard $*$$*.class),'$(f)')
-	$(JAVAC) $<
+	$(JAVAC) -d classes $<
 
-%.bash : %.class Makefile
-	echo '$(PREFACE) $(JAVA) -cp $(PWD) $* "$$@"' > $@
+%.bash : classes/%.class Makefile
+	echo '$(PREFACE) $(JAVA) -cp $(PWD)/classes $* "$$@"' > $@
 	chmod +x $@
 
-.PRECIOUS : %.class
+.PRECIOUS : classes/%.class
