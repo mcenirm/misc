@@ -46,6 +46,21 @@ public class MinimizeCodeBase {
 
     public static void main(final String[] args) throws IOException {
         fromCommandLine(args).run();
+        if (!PATTERN_TIMES.isEmpty()) {
+            System.out.println("-- pattern times --");
+            final Map<String, Long> patternAverages = new HashMap<>();
+            for (final Map.Entry<String, List<Long>> entry : PATTERN_TIMES.entrySet()) {
+                patternAverages.put(entry.getKey(),
+                        entry.getValue().stream().mapToLong(Long::longValue).sum() / entry.getValue().size());
+            }
+            patternAverages
+                    .entrySet()
+                    .stream()
+                    .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                    .forEach(e -> System.out.format("%6d  %4d  %s%n", e.getValue(),
+                            PATTERN_TIMES.get(e.getKey()).size(), e.getKey()));
+            System.out.println();
+        }
     }
 
     public void run() throws IOException {
@@ -90,24 +105,28 @@ public class MinimizeCodeBase {
             Files.createDirectories(this.jars);
             copyPaths(this.sourceFolder, this.jars, jarsToCopy, false, "jar");
         }
-
-        Files.createDirectories(this.classOutput);
         System.out.println();
 
         final Iterable<? extends File> sourcepathsAsFiles = asFileIterable(this.sourcepaths);
         final Iterable<? extends File> filesAsFiles = asFileIterable(this.javaFiles);
         final Iterable<? extends File> jarsAsFiles = asFileIterable(jarNames.stream().map(this.jars::resolve));
 
+        final Set<Path> suggestedUnresolvedJavaFiles = new LinkedHashSet<>();
+        final Set<Path> suggestedJavaFiles = new LinkedHashSet<>();
+        final Set<Path> suggestedJars = new LinkedHashSet<>();
+
+        final Map<String, Integer> codeScores = new HashMap<>();
+
         final DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<JavaFileObject>();
         final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         final StandardJavaFileManager fileManager = compiler.getStandardFileManager(diagnostics, null, UTF_8);
+        Files.createDirectories(this.classOutput);
         fileManager.setLocation(StandardLocation.CLASS_OUTPUT,
                 Collections.singletonList(this.classOutput.toFile()));
         fileManager.setLocation(StandardLocation.SOURCE_PATH, sourcepathsAsFiles);
         if (!jarNames.isEmpty()) {
             fileManager.setLocation(StandardLocation.CLASS_PATH, jarsAsFiles);
         }
-
         final Iterable<? extends JavaFileObject> javaFileObjects = fileManager
                 .getJavaFileObjectsFromFiles(filesAsFiles);
         final CompilationTask task = compiler.getTask(null, fileManager, diagnostics, null, null, javaFileObjects);
@@ -115,10 +134,6 @@ public class MinimizeCodeBase {
             System.out.println("compilation failed");
             System.out.println();
         }
-
-        final Set<Path> suggestedUnresolvedJavaFiles = new LinkedHashSet<>();
-        final Set<Path> suggestedJavaFiles = new LinkedHashSet<>();
-        final Set<Path> suggestedJars = new LinkedHashSet<>();
 
         int errorCount = 0;
         JavaFileObject previousSource = null;
@@ -147,6 +162,7 @@ public class MinimizeCodeBase {
                         guessPackage = dd.packageName;
                     }
                     if (null != guessJavaFile) {
+                        codeScores.merge(code, 1, Integer::sum);
                         break;
                     }
                 }
@@ -207,6 +223,7 @@ public class MinimizeCodeBase {
                 } else {
                     System.out.println("----------");
                     show("code", diag.getCode());
+                    show("message", escape(diag.getMessage(null)));
                     System.out.println(diag);
                     System.out.println();
                 }
@@ -216,6 +233,7 @@ public class MinimizeCodeBase {
                 previousSource = source;
             }
         }
+        fileManager.close();
 
         if (!suggestedUnresolvedJavaFiles.isEmpty()) {
             System.out.println("-- suggested unresolved java files --");
@@ -241,7 +259,15 @@ public class MinimizeCodeBase {
             System.out.println();
         }
 
-        fileManager.close();
+        if (!codeScores.isEmpty()) {
+            System.out.println("-- code scores --");
+            codeScores
+                    .entrySet()
+                    .stream()
+                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                    .forEach(e -> System.out.format("%4d  %s%n", e.getValue(), e.getKey()));
+            System.out.println();
+        }
     }
 
     protected void loadSourcepaths() throws IOException {
@@ -629,58 +655,59 @@ public class MinimizeCodeBase {
     public static final String GROUP_SYMBOL = "symbol";
     public static final String GROUP_TYPENAME = "typename";
 
-    public static final String JAVA_IDENTIFIER_REGEX = "\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*";
-    public static final String JAVA_PACKAGE_REGEX = JAVA_IDENTIFIER_REGEX
-            + "(?:\\."
-            + JAVA_IDENTIFIER_REGEX
-            + ")*";;
+    public static final String JAVA_IDENTIFIER_REGEX = "\\b\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*\\b";
+    public static final String JAVA_PACKAGE_REGEX = JAVA_IDENTIFIER_REGEX + "(?:\\." + JAVA_IDENTIFIER_REGEX + ")*";
     public static final String JAVA_PACKAGE_REGEX_GROUP = "(?<" + GROUP_PACKAGE + ">" + JAVA_PACKAGE_REGEX + ")";
 
+    public static final Map<String, Map<String, Pattern>> PATTERNS_FOR_COMPILER_ERR;
     public static final String COMPILER_ERR_CANT_RESOLVE_LOCATION = "compiler.err.cant.resolve.location";
-    public static final Pattern ERR_CANT_RESOLVE_LOCATION_MATCH_TYPE_SYMBOL_PACKAGE = Pattern.compile(
-            "cannot find symbol\\s+"
-                    + "symbol:\\s+"
-                    + "(?<" + GROUP_KEYWORD + ">class)"
-                    + "\\s+"
-                    + "(?<" + GROUP_SYMBOL + ">" + JAVA_IDENTIFIER_REGEX + ")"
-                    + "\\s+location:\\s+package\\s+"
-                    + JAVA_PACKAGE_REGEX_GROUP,
-            Pattern.MULTILINE);
-
-    private static final String COMPILER_ERR_DOESNT_EXIST = "compiler.err.doesnt.exist";
-    public static final Pattern ERR_DOESNT_EXIST_MATCH_PACKAGE_AND_QUALIFIED_REFERENCE = Pattern.compile(
-            "\\spackage\\s+"
-                    + JAVA_PACKAGE_REGEX_GROUP
-                    + "\\s+does\\s+not\\s+exist\\s.*?"
-                    + "(?<" + GROUP_TYPENAME + ">\\k<" + GROUP_PACKAGE + ">\\." + JAVA_IDENTIFIER_REGEX + ")",
-            Pattern.MULTILINE);
-
-    public static final Map<String, List<Pattern>> PATTERNS_FOR_COMPILER_ERR;
+    public static final String COMPILER_ERR_DOESNT_EXIST = "compiler.err.doesnt.exist";
     static {
-        final Map<String, List<Pattern>> m = new LinkedHashMap<>();
-        List<Pattern> temp;
+        final Map<String, Map<String, Pattern>> m = new LinkedHashMap<>();
+        Map<String, Pattern> temp;
 
-        temp = new ArrayList<>();
-        temp.add(ERR_CANT_RESOLVE_LOCATION_MATCH_TYPE_SYMBOL_PACKAGE);
-        m.put(COMPILER_ERR_CANT_RESOLVE_LOCATION, temp);
+        temp = new LinkedHashMap<>();
+        temp.put("cannot find symbol, location package", Pattern.compile(
+                "cannot find symbol\\s+"
+                        + "symbol:\\s+"
+                        + "(?<" + GROUP_KEYWORD + ">class)"
+                        + "\\s+"
+                        + "(?<" + GROUP_SYMBOL + ">" + JAVA_IDENTIFIER_REGEX + ")"
+                        + "\\s+location:\\s+package\\s+" + JAVA_PACKAGE_REGEX_GROUP,
+                Pattern.MULTILINE));
+        temp.put("cannot find symbol, location class", Pattern.compile(
+                "cannot find symbol\\s+"
+                        + "symbol:\\s+"
+                        + "(?<" + GROUP_KEYWORD + ">class)"
+                        + "\\s+"
+                        + "(?<" + GROUP_SYMBOL + ">" + JAVA_IDENTIFIER_REGEX + ")"
+                        + "\\s+location:\\s+" + "class\\s+"
+                        + JAVA_PACKAGE_REGEX_GROUP + "\\." + JAVA_IDENTIFIER_REGEX,
+                Pattern.MULTILINE));
+        m.put(COMPILER_ERR_CANT_RESOLVE_LOCATION, Collections.unmodifiableMap(temp));
 
-        temp = new ArrayList<>();
-        temp.add(ERR_DOESNT_EXIST_MATCH_PACKAGE_AND_QUALIFIED_REFERENCE);
-        m.put(COMPILER_ERR_DOESNT_EXIST, temp);
+        temp = new LinkedHashMap<>();
+        temp.put("package does not exist", Pattern.compile(
+                "\\spackage\\s+"
+                        + JAVA_PACKAGE_REGEX_GROUP
+                        + "\\s+does\\s+not\\s+exist\\s.*?"
+                        + "(?<" + GROUP_TYPENAME + ">\\k<" + GROUP_PACKAGE + ">\\." + JAVA_IDENTIFIER_REGEX + ")",
+                Pattern.MULTILINE));
+        m.put(COMPILER_ERR_DOESNT_EXIST, Collections.unmodifiableMap(temp));
 
         PATTERNS_FOR_COMPILER_ERR = Collections.unmodifiableMap(m);
     }
 
     static class DecodedDiagnostic {
         public Diagnostic<? extends JavaFileObject> diag;
-        public Pattern pattern;
+        public String pattern;
         public String matched;
         public String keyword;
         public String packageName;
         public String symbol;
         public String typename;
 
-        public DecodedDiagnostic(final Diagnostic<? extends JavaFileObject> diag, final Pattern pattern,
+        public DecodedDiagnostic(final Diagnostic<? extends JavaFileObject> diag, final String pattern,
                 final String matched, final String keyword, final String packageName, final String symbol,
                 final String typename) {
             this.diag = diag;
@@ -693,6 +720,7 @@ public class MinimizeCodeBase {
         }
 
         public void show(final String prefix) {
+            MinimizeCodeBase.show(prefix, "pattern", this.pattern);
             if (null != this.keyword) {
                 MinimizeCodeBase.show(prefix, "keyword", this.keyword);
             }
@@ -712,17 +740,30 @@ public class MinimizeCodeBase {
         }
     }
 
+    public static Map<String, List<Long>> PATTERN_TIMES = new HashMap<>();
+
     public static List<DecodedDiagnostic> decodeDiagnostic(final Diagnostic<? extends JavaFileObject> diag) {
         final ArrayList<MinimizeCodeBase.DecodedDiagnostic> details = new ArrayList<>();
         final String[] strs = { diag.getMessage(null), diag.toString() };
-        for (final Pattern pat : PATTERNS_FOR_COMPILER_ERR.get(diag.getCode())) {
+        final Map<String, Pattern> patterns = PATTERNS_FOR_COMPILER_ERR.getOrDefault(diag.getCode(),
+                Collections.emptyMap());
+        for (final Map.Entry<String, Pattern> entry : patterns.entrySet()) {
+            final String patternName = entry.getKey();
+            final Pattern pattern = entry.getValue();
             for (final String s : strs) {
-                // show("pattern", pat);
-                final Matcher m = pat.matcher(s);
-                if (m.find()) {
+                // show("pattern", patternName);
+                final Matcher m = pattern.matcher(s);
+                final long before = System.nanoTime();
+                final boolean found = m.find();
+                final long after = System.nanoTime();
+                if (!PATTERN_TIMES.containsKey(patternName)) {
+                    PATTERN_TIMES.put(patternName, new ArrayList<>());
+                }
+                PATTERN_TIMES.get(patternName).add(after - before);
+                if (found) {
                     final DecodedDiagnostic dd = new DecodedDiagnostic(
                             diag,
-                            pat,
+                            patternName,
                             s,
                             valueOfNamedGroup(m, GROUP_KEYWORD),
                             valueOfNamedGroup(m, GROUP_PACKAGE),
@@ -848,6 +889,8 @@ public class MinimizeCodeBase {
 }
 /*
  * TODO vague thoughts about improvement
+ * 
+ * avoid suggesting java files with insufficient package info
  * 
  * improve suggestions for each java file by checking if it exists in a known
  * sourcepath
