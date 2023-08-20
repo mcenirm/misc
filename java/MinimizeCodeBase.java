@@ -125,6 +125,7 @@ public class MinimizeCodeBase {
         for (final Diagnostic<? extends JavaFileObject> diag : diagnostics.getDiagnostics()) {
             if (Diagnostic.Kind.ERROR == diag.getKind()) {
                 errorCount++;
+                final String code = diag.getCode();
                 final JavaFileObject source = diag.getSource();
                 if (null != previousSource && !previousSource.equals(source)) {
                     break;
@@ -136,11 +137,11 @@ public class MinimizeCodeBase {
                 final Iterator<MinimizeCodeBase.DecodedDiagnostic> ddIter = decodeDiagnostic(diag).iterator();
                 while (ddIter.hasNext()) {
                     dd = ddIter.next();
-                    if (COMPILER_ERR_CANT_RESOLVE_LOCATION.equals(dd.code) && "class".equals(dd.keyword)
+                    if (COMPILER_ERR_CANT_RESOLVE_LOCATION.equals(code) && "class".equals(dd.keyword)
                             && null != dd.packageName && null != dd.symbol) {
                         guessJavaFile = qualifiedNameToJavaFile(dd.packageName, dd.symbol);
                         guessPackage = dd.packageName;
-                    } else if (COMPILER_ERR_DOESNT_EXIST.equals(dd.code) && null != dd.packageName
+                    } else if (COMPILER_ERR_DOESNT_EXIST.equals(code) && null != dd.packageName
                             && null != dd.typename) {
                         guessJavaFile = qualifiedNameToJavaFile(dd.typename);
                         guessPackage = dd.packageName;
@@ -623,45 +624,35 @@ public class MinimizeCodeBase {
         return copied;
     }
 
-    public static final String JAVA_IDENTIFIER_REGEX = "\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*";
-    public static final String JAVA_PACKAGE_REGEX = JAVA_IDENTIFIER_REGEX
-            + "(?:\\."
-            + JAVA_IDENTIFIER_REGEX
-            + ")*";;
-
     public static final String GROUP_KEYWORD = "keyword";
     public static final String GROUP_PACKAGE = "package";
     public static final String GROUP_SYMBOL = "symbol";
     public static final String GROUP_TYPENAME = "typename";
 
+    public static final String JAVA_IDENTIFIER_REGEX = "\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*";
+    public static final String JAVA_PACKAGE_REGEX = JAVA_IDENTIFIER_REGEX
+            + "(?:\\."
+            + JAVA_IDENTIFIER_REGEX
+            + ")*";;
+    public static final String JAVA_PACKAGE_REGEX_GROUP = "(?<" + GROUP_PACKAGE + ">" + JAVA_PACKAGE_REGEX + ")";
+
     public static final String COMPILER_ERR_CANT_RESOLVE_LOCATION = "compiler.err.cant.resolve.location";
     public static final Pattern ERR_CANT_RESOLVE_LOCATION_MATCH_TYPE_SYMBOL_PACKAGE = Pattern.compile(
-            "cannot find symbol\\s+symbol:\\s+(?<"
-                    + GROUP_KEYWORD
-                    + ">class)\\s+(?<"
-                    + GROUP_SYMBOL
-                    + ">"
-                    + JAVA_IDENTIFIER_REGEX
-                    + ")\\s+location:\\s+package\\s+(?<"
-                    + GROUP_PACKAGE
-                    + ">"
-                    + JAVA_PACKAGE_REGEX
-                    + ")",
+            "cannot find symbol\\s+"
+                    + "symbol:\\s+"
+                    + "(?<" + GROUP_KEYWORD + ">class)"
+                    + "\\s+"
+                    + "(?<" + GROUP_SYMBOL + ">" + JAVA_IDENTIFIER_REGEX + ")"
+                    + "\\s+location:\\s+package\\s+"
+                    + JAVA_PACKAGE_REGEX_GROUP,
             Pattern.MULTILINE);
 
     private static final String COMPILER_ERR_DOESNT_EXIST = "compiler.err.doesnt.exist";
-    public static final Pattern ERR_DOESNT_EXIST_MATCH_IMPORT = Pattern.compile(
-            "\\spackage\\s+(?<"
-                    + GROUP_PACKAGE
-                    + ">"
-                    + JAVA_PACKAGE_REGEX
-                    + ")\\s+does\\s+not\\s+exist\\s+import\\s+(?<"
-                    + GROUP_TYPENAME
-                    + ">\\k<"
-                    + GROUP_PACKAGE
-                    + ">\\."
-                    + JAVA_IDENTIFIER_REGEX
-                    + ")\\s*;\\s",
+    public static final Pattern ERR_DOESNT_EXIST_MATCH_PACKAGE_AND_QUALIFIED_REFERENCE = Pattern.compile(
+            "\\spackage\\s+"
+                    + JAVA_PACKAGE_REGEX_GROUP
+                    + "\\s+does\\s+not\\s+exist\\s.*?"
+                    + "(?<" + GROUP_TYPENAME + ">\\k<" + GROUP_PACKAGE + ">\\." + JAVA_IDENTIFIER_REGEX + ")",
             Pattern.MULTILINE);
 
     public static final Map<String, List<Pattern>> PATTERNS_FOR_COMPILER_ERR;
@@ -674,7 +665,7 @@ public class MinimizeCodeBase {
         m.put(COMPILER_ERR_CANT_RESOLVE_LOCATION, temp);
 
         temp = new ArrayList<>();
-        temp.add(ERR_DOESNT_EXIST_MATCH_IMPORT);
+        temp.add(ERR_DOESNT_EXIST_MATCH_PACKAGE_AND_QUALIFIED_REFERENCE);
         m.put(COMPILER_ERR_DOESNT_EXIST, temp);
 
         PATTERNS_FOR_COMPILER_ERR = Collections.unmodifiableMap(m);
@@ -682,56 +673,62 @@ public class MinimizeCodeBase {
 
     static class DecodedDiagnostic {
         public Diagnostic<? extends JavaFileObject> diag;
-        public String err;
+        public Pattern pattern;
         public String matched;
-        public String code;
         public String keyword;
         public String packageName;
         public String symbol;
         public String typename;
 
-        public DecodedDiagnostic(final Diagnostic<? extends JavaFileObject> diag, final String err,
-                final String matched, final String code, final String keyword,
-                final String packageName, final String symbol, final String typename) {
+        public DecodedDiagnostic(final Diagnostic<? extends JavaFileObject> diag, final Pattern pattern,
+                final String matched, final String keyword, final String packageName, final String symbol,
+                final String typename) {
             this.diag = diag;
-            this.err = err;
+            this.pattern = pattern;
             this.matched = matched;
-            this.code = code;
             this.keyword = keyword;
             this.packageName = packageName;
             this.symbol = symbol;
             this.typename = typename;
         }
 
+        public void show(final String prefix) {
+            if (null != this.keyword) {
+                MinimizeCodeBase.show(prefix, "keyword", this.keyword);
+            }
+            if (null != this.packageName) {
+                MinimizeCodeBase.show(prefix, "packageName", this.packageName);
+            }
+            if (null != this.symbol) {
+                MinimizeCodeBase.show(prefix, "symbol", this.symbol);
+            }
+            if (null != this.typename) {
+                MinimizeCodeBase.show(prefix, "typename", this.typename);
+            }
+        }
+
         public void show() {
-            MinimizeCodeBase.show("err", this.err);
-            MinimizeCodeBase.show("matched", this.matched);
-            MinimizeCodeBase.show("code", this.code);
-            MinimizeCodeBase.show("keyword", this.keyword);
-            MinimizeCodeBase.show("packageName", this.packageName);
-            MinimizeCodeBase.show("symbol", this.symbol);
-            MinimizeCodeBase.show("typename", this.typename);
+            this.show("");
         }
     }
 
     public static List<DecodedDiagnostic> decodeDiagnostic(final Diagnostic<? extends JavaFileObject> diag) {
         final ArrayList<MinimizeCodeBase.DecodedDiagnostic> details = new ArrayList<>();
         final String[] strs = { diag.getMessage(null), diag.toString() };
-        for (final String err : PATTERNS_FOR_COMPILER_ERR.keySet()) {
-            for (final Pattern pat : PATTERNS_FOR_COMPILER_ERR.get(err)) {
-                for (final String s : strs) {
-                    final Matcher m = pat.matcher(s);
-                    if (m.find()) {
-                        details.add(new DecodedDiagnostic(
-                                diag,
-                                err,
-                                s,
-                                diag.getCode(),
-                                valueOfNamedGroup(m, GROUP_KEYWORD),
-                                valueOfNamedGroup(m, GROUP_PACKAGE),
-                                valueOfNamedGroup(m, GROUP_SYMBOL),
-                                valueOfNamedGroup(m, GROUP_TYPENAME)));
-                    }
+        for (final Pattern pat : PATTERNS_FOR_COMPILER_ERR.get(diag.getCode())) {
+            for (final String s : strs) {
+                // show("pattern", pat);
+                final Matcher m = pat.matcher(s);
+                if (m.find()) {
+                    final DecodedDiagnostic dd = new DecodedDiagnostic(
+                            diag,
+                            pat,
+                            s,
+                            valueOfNamedGroup(m, GROUP_KEYWORD),
+                            valueOfNamedGroup(m, GROUP_PACKAGE),
+                            valueOfNamedGroup(m, GROUP_SYMBOL),
+                            valueOfNamedGroup(m, GROUP_TYPENAME));
+                    details.add(dd);
                 }
             }
         }
