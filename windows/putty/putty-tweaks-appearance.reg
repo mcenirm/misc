@@ -9,4 +9,5 @@ Windows Registry Editor Version 5.00
 "SshBanner"=dword:00000000
 "SunkenEdge"=dword:00000001
 "TermHeight"=dword:00000028
+"TerminalType"="putty-256color"
 "TermWidth"=dword:00000064
