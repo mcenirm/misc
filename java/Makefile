@@ -27,7 +27,7 @@ all : $(BASH_FILES)
 
 classes/%.class : %.java
 	[ -d classes ] || mkdir classes
-	$(RM) -v -- $@ $(foreach f,$(wildcard $*$$*.class),'$(f)')
+	$(RM) -v -- $@ $(foreach f,$(wildcard classes/$*$$*.class),'$(f)')
 	$(JAVAC) -d classes $<
 
 %.bash : classes/%.class Makefile
