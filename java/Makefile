@@ -1,3 +1,7 @@
+ifneq (s,$(findstring s,$(word 1, $(MAKEFLAGS))))
+RM := $(RM) -v
+endif
+
 JAVA := java
 JAVAC := javac
 ifneq ($(JAVA_HOME),)
@@ -27,7 +31,7 @@ all : $(BASH_FILES)
 
 classes/%.class : %.java
 	[ -d classes ] || mkdir classes
-	$(RM) -v -- $@ $(foreach f,$(wildcard classes/$*$$*.class),'$(f)')
+	$(RM) -- $@ $(foreach f,$(wildcard classes/$*$$*.class),'$(f)')
 	$(JAVAC) -d classes $<
 
 %.bash : classes/%.class Makefile
