@@ -19,7 +19,7 @@ import javax.tools.ToolProvider;
  * A class that conditionally recompiles itself
  */
 public class RecompileSelf {
-    public static void main(String[] args) throws IOException {
+    public static void main(final String[] args) throws IOException {
         recompile(RecompileSelf.class, () -> {
             System.out.println("Recompiled self. Exiting. Run again.");
         }, () -> {
@@ -27,7 +27,7 @@ public class RecompileSelf {
         });
     }
 
-    public static void recompile(final Class<?> clazz, Runnable ifRecompiled, Runnable ifNotRecompiled)
+    public static void recompile(final Class<?> clazz, final Runnable ifRecompiled, final Runnable ifNotRecompiled)
             throws IOException {
         if (shouldRecompile(clazz)) {
             compile(clazz);
@@ -37,7 +37,7 @@ public class RecompileSelf {
         }
     }
 
-    public static void recompile(final Class<?> clazz, Runnable ifRecompiled) throws IOException {
+    public static void recompile(final Class<?> clazz, final Runnable ifRecompiled) throws IOException {
         recompile(clazz, ifRecompiled, () -> {
         });
     }
@@ -53,21 +53,22 @@ public class RecompileSelf {
 
     public static boolean shouldRecompile(final File sourceFile, final File classFile)
             throws IOException {
-        Path sourceFilePath = sourceFile.toPath();
-        Path classFilePath = classFile.toPath();
+        final Path sourceFilePath = sourceFile.toPath();
+        final Path classFilePath = classFile.toPath();
         if (!Files.exists(classFilePath)) {
             return true;
         }
-        FileTime mtimeSource = Files.getLastModifiedTime(sourceFilePath);
-        FileTime mtimeClass = Files.getLastModifiedTime(classFilePath);
+        final FileTime mtimeSource = Files.getLastModifiedTime(sourceFilePath);
+        final FileTime mtimeClass = Files.getLastModifiedTime(classFilePath);
         return mtimeSource.compareTo(mtimeClass) > 0;
     }
 
-    public static boolean compile(final Class<?> clazz, Writer out,
-            DiagnosticListener<? super JavaFileObject> diagnosticListener, Locale locale, Charset charset,
-            Iterable<String> options)
+    public static boolean compile(final Class<?> clazz, final Writer out,
+            final DiagnosticListener<? super JavaFileObject> diagnosticListener, final Locale locale,
+            final Charset charset,
+            final Iterable<String> options)
             throws IOException {
-        File file = asFile(clazz, Kind.SOURCE);
+        final File file = asFile(clazz, Kind.SOURCE);
         final JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         final StandardJavaFileManager fileManager = compiler.getStandardFileManager(diagnosticListener, locale,
                 charset);
@@ -80,7 +81,7 @@ public class RecompileSelf {
         }
     }
 
-    public static boolean compile(final Class<?> clazz, Writer out) throws IOException {
+    public static boolean compile(final Class<?> clazz, final Writer out) throws IOException {
         return compile(clazz, out, null, null, null, null);
     }
 
@@ -88,7 +89,7 @@ public class RecompileSelf {
         return compile(clazz, null);
     }
 
-    public static File asFile(final Class<?> clazz, Kind kind) {
+    public static File asFile(final Class<?> clazz, final Kind kind) {
         return new File(clazz.getName() + kind.extension);
     }
 }
