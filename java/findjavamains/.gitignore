@@ -1,2 +1,8 @@
 /.gradle/
 /build/
+
+# created by jdt and buildship
+/.classpath
+/.project
+/.settings/
+/bin/
