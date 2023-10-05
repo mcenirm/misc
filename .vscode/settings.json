@@ -3,6 +3,13 @@
     "files.insertFinalNewline": true,
     "files.trimFinalNewlines": true,
     "java.import.generatesMetadataFilesAtProjectRoot": true,
+    "java.cleanup.actionsOnSave": [
+        "addDeprecated",
+        "invertEquals",
+        "addFinalModifier",
+        "qualifyMembers"
+    ],
+    "java.gradle.buildServer.enabled": "on",
     "isort.args": [
         "--profile",
         "black"
