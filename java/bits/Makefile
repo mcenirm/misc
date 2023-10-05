@@ -1,7 +1,9 @@
+# If make is not in "silent" mode, then make sure rm is verbose
 ifneq (s,$(findstring s,$(word 1, $(MAKEFLAGS))))
 RM := $(RM) -v
 endif
 
+# If JAVA_HOME is set, then use that for building and running
 JAVA := java
 JAVAC := javac
 ifneq ($(JAVA_HOME),)
@@ -13,8 +15,8 @@ else
 PREFACE :=
 endif
 
-JAVA_FILES := $(wildcard *.java)
-BASH_FILES := $(JAVA_FILES:.java=.bash)
+JAVA_FILES := $(wildcard src/*.java)
+BASH_FILES := $(patsubst src/%.java,scripts/%.bash,$(JAVA_FILES))
 
 define USAGE
 Found targets:
@@ -29,12 +31,13 @@ usage:
 
 all : $(BASH_FILES)
 
-classes/%.class : %.java
+classes/%.class : src/%.java
 	[ -d classes ] || mkdir classes
 	$(RM) -- $@ $(foreach f,$(wildcard classes/$*$$*.class),'$(f)')
 	$(JAVAC) -d classes $<
 
-%.bash : classes/%.class Makefile
+scripts/%.bash : classes/%.class Makefile
+	[ -d scripts ] || mkdir scripts
 	echo '$(PREFACE) $(JAVA) -cp $(PWD)/classes $* "$$@"' > $@
 	chmod +x $@
 
