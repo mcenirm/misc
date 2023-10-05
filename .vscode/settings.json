@@ -2,7 +2,7 @@
     "editor.formatOnSave": true,
     "files.insertFinalNewline": true,
     "files.trimFinalNewlines": true,
-    "python.formatting.provider": "black",
+    "java.import.generatesMetadataFilesAtProjectRoot": true,
     "isort.args": [
         "--profile",
         "black"
