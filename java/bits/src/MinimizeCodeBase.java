@@ -46,6 +46,10 @@ public class MinimizeCodeBase {
             "Where:",
             "  original       folder with full code base",
             "  destination    folder that will hold minimal code base [\".\"]",
+            "                 subfolders:",
+            "                  - classes/    compiled class files",
+            "                  - jars/       jar file dependencies",
+            "                  - sources/    java source files and resource files",
     };
 
     public static void main(final String[] args) throws IOException {
@@ -69,8 +73,8 @@ public class MinimizeCodeBase {
         // show error code counts and collect errors from just the first N java files
         // TODO keep going for all?
         final int javaFileLimit = 10;
-        final Map<JavaFile, List<Diagnostic<? extends JavaFileObject>>> errorsByJavaFile = new LinkedHashMap<>();
-        final PrintWriter errorsPrinter = new PrintWriter(this.classesFolder
+        final Map<CopiedJavaFile, List<Diagnostic<? extends JavaFileObject>>> errorsByJavaFile = new LinkedHashMap<>();
+        final PrintWriter errorsPrinter = new PrintWriter(this.destinationClassesFolder
                 .resolve("errors.txt")
                 .toFile());
         try {
@@ -83,7 +87,7 @@ public class MinimizeCodeBase {
                 i++;
                 final Entry<JavaFileObject, List<Diagnostic<? extends JavaFileObject>>> entry = entries.next();
                 final JavaFileObject source = entry.getKey();
-                final JavaFile javaFile = new JavaFile(Paths.get(source.getName()), this.sourcesFolder);
+                final CopiedJavaFile javaFile = this.javaFileHelper.lookup(source);
                 final List<Diagnostic<? extends JavaFileObject>> errors = entry.getValue();
                 errorsByJavaFile.put(javaFile, errors);
                 this.out.println(javaFile.forListing());
@@ -124,10 +128,11 @@ public class MinimizeCodeBase {
         ///////////////////////////////////////
 
         // for each java file, look at errors and guess dependencies
-        final Map<JavaName, Set<JavaFile>> missingImportsAndTheJavaFilesThatNeedThem = new LinkedHashMap<>();
-        final Map<JavaFile, Set<JavaName>> javaFilesWithMissingSymbols = new LinkedHashMap<>();
-        for (final Entry<JavaFile, List<Diagnostic<? extends JavaFileObject>>> entry : errorsByJavaFile.entrySet()) {
-            final JavaFile javaFile = entry.getKey();
+        final Map<JavaName, Set<CopiedJavaFile>> missingImportsAndTheJavaFilesThatNeedThem = new LinkedHashMap<>();
+        final Map<CopiedJavaFile, Set<JavaName>> javaFilesWithMissingSymbols = new LinkedHashMap<>();
+        for (final Entry<CopiedJavaFile, List<Diagnostic<? extends JavaFileObject>>> entry : errorsByJavaFile
+                .entrySet()) {
+            final CopiedJavaFile javaFile = entry.getKey();
             final List<Diagnostic<? extends JavaFileObject>> errors = entry.getValue();
 
             final Map<JavaName, JavaName> importsBySymbolForCurrentJavaFile = new LinkedHashMap<>();
@@ -213,8 +218,8 @@ public class MinimizeCodeBase {
         // list missing symbols and imports
         if (!javaFilesWithMissingSymbols.isEmpty()) {
             this.out.println("---- missing symbols by java file ----");
-            for (final Entry<JavaFile, Set<JavaName>> entry : javaFilesWithMissingSymbols.entrySet()) {
-                final JavaFile javaFile = entry.getKey();
+            for (final Entry<CopiedJavaFile, Set<JavaName>> entry : javaFilesWithMissingSymbols.entrySet()) {
+                final CopiedJavaFile javaFile = entry.getKey();
                 final Set<JavaName> symbols = entry.getValue();
                 this.out.println(javaFile.forListing());
                 if (!symbols.isEmpty()) {
@@ -236,19 +241,27 @@ public class MinimizeCodeBase {
         ///////////////////////////////////////
 
         // collect easy candidates
-        final Set<JavaFile> candidateJavaFiles = new LinkedHashSet<>();
+        /*
+         * Example 1
+         * * when dest/sources/.../com/example/Foo.java uses simple symbol Bar
+         * * and original...../.../com/example/Bar.java exists
+         * * then suggest....: .../com/example/Bar.java
+         */
+        final Set<CopiedJavaFile> candidateJavaFiles = new LinkedHashSet<>();
         if (!javaFilesWithMissingSymbols.isEmpty()) {
-            for (final Entry<JavaFile, Set<JavaName>> entry : javaFilesWithMissingSymbols.entrySet()) {
-                final JavaFile javaFile = entry.getKey();
+            for (final Entry<CopiedJavaFile, Set<JavaName>> entry : javaFilesWithMissingSymbols.entrySet()) {
+                final CopiedJavaFile javaFile = entry.getKey();
                 final Set<JavaName> symbols = entry.getValue();
                 if (!symbols.isEmpty()) {
-                    final Path currentPackageFolder = javaFile.path.getParent();
+                    final Path originalPackageFolder = javaFile.originalResolved.getParent();
+                    final Path relativePackageFolder = javaFile.relative.getParent();
                     for (final JavaName symbol : symbols) {
                         if (symbol.isSimpleName) {
-                            final JavaFile candidate = this.originalJavaFileHelper.lookup(
-                                    currentPackageFolder.resolve(symbol.name + JavaFileObject.Kind.SOURCE.extension));
-                            if (candidate.exists()) {
-                                candidateJavaFiles.add(candidate);
+                            final String fileName = symbol.name + CopiedJavaFile.EXTENSION;
+                            final Path originalCandidate = originalPackageFolder.resolve(fileName);
+                            if (Files.exists(originalCandidate)) {
+                                final Path relativeCandidate = relativePackageFolder.resolve(fileName);
+                                candidateJavaFiles.add(this.javaFileHelper.lookup(relativeCandidate));
                             }
                         }
                     }
@@ -259,14 +272,15 @@ public class MinimizeCodeBase {
         // TODO find candidate imports using jar files from originalFolder
         if (!missingImportsAndTheJavaFilesThatNeedThem.isEmpty()) {
             this.out.println("---- lalala ----");
-            for (final Entry<JavaName, Set<JavaFile>> entry : missingImportsAndTheJavaFilesThatNeedThem.entrySet()) {
+            for (final Entry<JavaName, Set<CopiedJavaFile>> entry : missingImportsAndTheJavaFilesThatNeedThem
+                    .entrySet()) {
                 final JavaName missingImport = entry.getKey();
-                final Set<JavaFile> javaFiles = entry.getValue();
+                final Set<CopiedJavaFile> javaFiles = entry.getValue();
                 this.out.println(missingImport);
-                for (final JavaFile javaFile : javaFiles) {
+                for (final CopiedJavaFile javaFile : javaFiles) {
                     this.out.println("  " + javaFile.forListing());
                     if (javaFile.packageName.isPresent()) {
-                        this.out.println("    " + javaFile.packageName.toString());
+                        this.out.println("    " + javaFile.packageName.get().toString());
                     } else {
                         this.out.println("    <unguessed package>");
                     }
@@ -280,7 +294,7 @@ public class MinimizeCodeBase {
 
         if (!candidateJavaFiles.isEmpty()) {
             this.out.println("---- candidate java files ----");
-            for (final JavaFile candidate : candidateJavaFiles) {
+            for (final CopiedJavaFile candidate : candidateJavaFiles) {
                 this.out.println(candidate.forListing());
             }
             this.out.println();
@@ -491,19 +505,19 @@ public class MinimizeCodeBase {
     }
 
     protected void copyFilesAndDependencies() throws IOException {
-        Files.createDirectories(this.sourcesFolder);
+        Files.createDirectories(this.destinationSourcesFolder);
         this.copyFiles(
                 this.originalFolder,
-                this.sourcesFolder,
+                this.destinationSourcesFolder,
                 this.files,
                 true,
                 null);
 
         if (!this.jarsToCopy.isEmpty()) {
-            Files.createDirectories(this.jarsFolder);
+            Files.createDirectories(this.destinationJarsFolder);
             this.copyFiles(
                     this.originalFolder,
-                    this.jarsFolder,
+                    this.destinationJarsFolder,
                     this.jarsToCopy,
                     false,
                     "jar");
@@ -512,10 +526,10 @@ public class MinimizeCodeBase {
 
     protected void compile() throws IOException {
         this.compilationResult = StaticHelpers.compile(
-                this.classesFolder.toFile(),
-                StaticHelpers.asFileIterable(this.javaFiles.stream().map(f -> f.resolvedPath)),
-                StaticHelpers.asFileIterable(this.sourcepaths.stream().map(this.sourcesFolder::resolve)),
-                StaticHelpers.asFileIterable(this.jarNames.stream().map(this.jarsFolder::resolve)));
+                this.destinationClassesFolder.toFile(),
+                StaticHelpers.asFileIterable(this.javaFiles.stream().map(f -> f.destinationResolved)),
+                StaticHelpers.asFileIterable(this.sourcepaths.stream().map(this.destinationSourcesFolder::resolve)),
+                StaticHelpers.asFileIterable(this.jarNames.stream().map(this.destinationJarsFolder::resolve)));
     }
 
     protected void loadFiles() throws IOException {
@@ -535,11 +549,10 @@ public class MinimizeCodeBase {
     }
 
     protected void identifyJavaFiles() throws IOException {
-        this.originalJavaFileHelper.clear();
-        this.sourcesJavaFileHelper.clear();
+        this.javaFileHelper.clear();
         for (final Path fileAsPath : this.files) {
-            if (StaticHelpers.isJavaSource(fileAsPath)) {
-                final JavaFile fileAsJavaFile = this.sourcesJavaFileHelper.lookup(fileAsPath);
+            if (CopiedJavaFile.isJavaSource(fileAsPath)) {
+                final CopiedJavaFile fileAsJavaFile = this.javaFileHelper.lookup(fileAsPath);
                 this.javaFiles.add(fileAsJavaFile);
             }
         }
@@ -573,10 +586,10 @@ public class MinimizeCodeBase {
     }
 
     protected void checkJavaFiles() throws IOException {
-        for (final JavaFile javaFile : this.javaFiles) {
+        for (final CopiedJavaFile javaFile : this.javaFiles) {
             final List<Path> parentSourcepaths = this.sourcepaths
                     .stream()
-                    .filter(sp -> javaFile.path.startsWith(sp))
+                    .filter(sourcepath -> javaFile.relative.startsWith(sourcepath))
                     .collect(Collectors.toList());
             if (parentSourcepaths.size() < 1) {
                 // final StringBuilder message = new StringBuilder()
@@ -600,14 +613,14 @@ public class MinimizeCodeBase {
                 }
                 this.out.println();
             } else {
-                final Path sp = parentSourcepaths.get(0);
-                this.sourcepathForJavaFile.put(javaFile, sp);
-                final Path relativePath = sp.relativize(javaFile.path);
-                final JavaName packageName = MinimizeCodeBase.JavaName.fromFolders(relativePath.getParent());
+                final Path sourcepath = parentSourcepaths.get(0);
+                this.sourcepathForJavaFile.put(javaFile, sourcepath);
+                final Path relativePath = sourcepath.relativize(javaFile.relative);
+                final JavaName packageName = JavaName.fromFolders(relativePath.getParent());
                 this.packageForJavaFile.put(javaFile, packageName);
                 this.sourcepathsForPackage
                         .computeIfAbsent(packageName, k -> new LinkedHashSet<>())
-                        .add(sp);
+                        .add(sourcepath);
             }
         }
     }
@@ -654,9 +667,9 @@ public class MinimizeCodeBase {
         this.filesListing = this.resolveRequiredListing("files");
         this.sourcepathsListing = this.resolveOptionalListing("sourcepaths");
         this.dependenciesListing = this.resolveOptionalListing("dependencies");
-        this.sourcesFolder = this.resolveDestinationFolder("sources");
-        this.classesFolder = this.resolveDestinationFolder("classes");
-        this.jarsFolder = this.resolveDestinationFolder("jars");
+        this.destinationSourcesFolder = this.resolveDestinationFolder("sources");
+        this.destinationClassesFolder = this.resolveDestinationFolder("classes");
+        this.destinationJarsFolder = this.resolveDestinationFolder("jars");
 
         // items loaded from listings
         this.sourcepaths = new ArrayList<>();
@@ -664,7 +677,7 @@ public class MinimizeCodeBase {
         this.dependencies = new ArrayList<>();
 
         // calculated collections (cleared at start of run)
-        this.sourcesJavaFileHelper = new RelativeJavaFileHelper(this.sourcesFolder);
+        this.javaFileHelper = new CopiedJavaFileHelper(this.originalFolder, this.destinationSourcesFolder);
         this.javaFiles = new ArrayList<>();
         this.jarsToCopy = new ArrayList<>();
         this.jarsNotCopiedDueToNameCollision = new ArrayList<>();
@@ -692,15 +705,18 @@ public class MinimizeCodeBase {
     protected final Path sourcepathsListing;
     protected final Path filesListing;
     protected final Path dependenciesListing;
-    protected final Path sourcesFolder;
-    protected final Path classesFolder;
-    protected final Path jarsFolder;
+    protected final Path destinationSourcesFolder;
+    protected final Path destinationClassesFolder;
+    protected final Path destinationJarsFolder;
     protected final List<Path> sourcepaths;
     protected final List<Path> files;
-    protected final List<JavaFile> javaFiles;
+    protected final List<CopiedJavaFile> javaFiles;
     protected final List<String> dependencies;
-    protected final Map<JavaFile, Path> sourcepathForJavaFile;
-    protected final Map<JavaFile, JavaName> packageForJavaFile;
+
+    protected final CopiedJavaFileHelper javaFileHelper;
+
+    protected final Map<CopiedJavaFile, Path> sourcepathForJavaFile;
+    protected final Map<CopiedJavaFile, JavaName> packageForJavaFile;
     protected final Map<JavaName, Set<Path>> sourcepathsForPackage;
     protected final List<Path> jarsToCopy;
     protected final List<Path> jarsNotCopiedDueToNameCollision;
@@ -714,7 +730,6 @@ public class MinimizeCodeBase {
     protected final Set<Path> suggestedJavaFiles;
     protected final Set<Path> suggestedJars;
     protected final Map<String, Integer> codeScores;
-    protected final RelativeJavaFileHelper sourcesJavaFileHelper;
     protected CompilationResult compilationResult;
 
     public static MinimizeCodeBase fromCommandLine(final String[] args) throws IOException {
@@ -756,6 +771,7 @@ public class MinimizeCodeBase {
         usage(0);
     }
 
+    @SuppressWarnings("resource")
     public static void usage(final int exitStatus) {
         final PrintStream out = 0 == exitStatus ? System.out : System.err;
         for (final String line : USAGE) {
@@ -1244,10 +1260,6 @@ public class MinimizeCodeBase {
     // }
     // }
 
-    public static String preparePathForListing(final Path p) {
-        return p.toString().replace(File.separatorChar, '/');
-    }
-
     public static boolean jarContainsType(final Path jar, final JavaName typeName) {
         final ProcessBuilder pb = new ProcessBuilder(
                 "javap",
@@ -1482,51 +1494,101 @@ public class MinimizeCodeBase {
         }
     }
 
-    static class JavaFile {
+    static class CopiedFile implements Showable {
+        final Path originalFolder;
+        final Path originalRelative;
+        final Path originalResolved;
+        final Path destinationFolder;
+        final Path destinationRelative;
+        final Path destinationResolved;
+
+        CopiedFile(
+                final Path originalFolder,
+                final Path originalRelative,
+                final Path destinationFolder,
+                final Path destinationRelative) {
+            if (null == originalFolder) {
+                throw new NullPointerException("originalFolder");
+            }
+            if (null == originalRelative) {
+                throw new NullPointerException("originalRelative");
+            }
+            if (null == destinationFolder) {
+                throw new NullPointerException("destinationFolder");
+            }
+            if (null == destinationRelative) {
+                throw new NullPointerException("destinationRelative");
+            }
+
+            this.originalFolder = originalFolder;
+            this.originalRelative = originalRelative;
+            this.originalResolved = originalFolder.resolve(originalRelative);
+            this.destinationFolder = destinationFolder;
+            this.destinationRelative = destinationRelative;
+            this.destinationResolved = destinationFolder.resolve(destinationRelative);
+        }
+
+        public LinkedHashMap<String, Object> getShowableProperties() {
+            final LinkedHashMap<String, Object> x = new LinkedHashMap<>();
+            x.put("originalFolder", this.originalFolder);
+            x.put("originalRelative", this.originalRelative);
+            x.put("originalResolved", this.originalResolved);
+            x.put("destinationFolder", this.destinationFolder);
+            x.put("destinationRelative", this.destinationRelative);
+            x.put("destinationResolved", this.destinationResolved);
+            return x;
+        }
+
+        boolean originalExists() {
+            return Files.exists(this.originalResolved);
+        }
+
+        boolean destinationExists() {
+            return Files.exists(this.destinationResolved);
+        }
+
+        boolean copied() {
+            return this.originalExists() && this.destinationExists();
+        }
+
+        @Override
+        public String toString() {
+            throw new UnsupportedOperationException();
+        }
+
+        String forListing() {
+            return StaticHelpers.preparePathForListing(this.originalRelative);
+        }
+    }
+
+    static class CopiedJavaFile extends CopiedFile {
         final static String EXTENSION = JavaFileObject.Kind.SOURCE.extension;
         final static int EXTENSION_LENGTH = EXTENSION.length();
 
-        final Path path;
-        final Path relativeTo;
-        final Path resolvedPath;
+        final Path relative;
         final JavaName simpleName;
         final Optional<JavaName> packageName;
         final Optional<JavaName> qualifiedName;
 
-        JavaFile(final JavaFileObject javaFileObject, final Path relativeTo) {
-            this(javaFileObject.getName(), relativeTo);
-        }
-
-        JavaFile(final String path, final Path relativeTo) {
-            this(Paths.get(path), relativeTo);
-        }
-
-        JavaFile(final Path path, final Path relativeTo) {
-            if (null == path) {
-                throw new NullPointerException("path");
-            }
-            if (path.getNameCount() < 1) {
-                throw new IllegalArgumentException("path is empty");
-            }
-            if (!path.getFileName().toString().endsWith(EXTENSION)) {
+        CopiedJavaFile(
+                final Path relative,
+                final Path originalFolder,
+                final Path destinationFolder) {
+            super(originalFolder, relative, destinationFolder, relative);
+            if (!isJavaSource(relative)) {
                 throw new IllegalArgumentException(String.format(
                         "does not end with \"%s\": %s",
                         EXTENSION,
-                        path));
+                        relative));
             }
-            this.path = path;
-            this.relativeTo = relativeTo;
-            final String fileName = this.path.getFileName().toString();
+            this.relative = relative;
+
+            final String fileName = this.originalRelative.getFileName().toString();
             final String typeName = fileName.substring(
                     0,
                     fileName.length() - EXTENSION_LENGTH);
             this.simpleName = new JavaName(typeName);
-            if (null == relativeTo) {
-                this.resolvedPath = this.path;
-            } else {
-                this.resolvedPath = relativeTo.resolve(this.path);
-            }
-            this.packageName = guessPackageName(this.resolvedPath);
+            this.packageName = guessPackageName(this.originalResolved);
             if (this.packageName.isPresent()) {
                 this.qualifiedName = Optional.of(this.packageName.get().resolve(this.simpleName));
             } else {
@@ -1534,27 +1596,25 @@ public class MinimizeCodeBase {
             }
         }
 
-        boolean exists() {
-            return Files.exists(this.resolvedPath);
-        }
-
-        String forListing() {
-            return preparePathForListing(this.path);
-        }
-
         @Override
-        public String toString() {
-            throw new UnsupportedOperationException();
-            // return "JavaFile [path=" + this.path + ", relativeTo=" + this.relativeTo + ",
-            // resolvedPath=" + this.resolvedPath
-            // + ", simpleName=" + this.simpleName + ", packageName=" + this.packageName +
-            // ", qualifiedName=" + this.qualifiedName
-            // + "]";
+        public LinkedHashMap<String, Object> getShowableProperties() {
+            final LinkedHashMap<String, Object> x = super.getShowableProperties();
+            x.put("simpleName", this.simpleName);
+            this.packageName.ifPresent(v -> x.put("packageName", v));
+            this.qualifiedName.ifPresent(v -> x.put("qualifiedName", v));
+            return x;
+        }
+
+        public static boolean isJavaSource(final Path p) {
+            return p.getFileName().toString().endsWith(EXTENSION);
         }
 
         static Optional<JavaName> guessPackageName(final Path resolvedPath) {
             try {
-                for (final String line : Files.lines(resolvedPath).limit(10).toArray(String[]::new)) {
+                for (final String line : Files
+                        .lines(resolvedPath)
+                        .limit(10)
+                        .toArray(String[]::new)) {
                     final Matcher m = JAVA_PACKAGE_STATEMENT_PATTERN.matcher(line);
                     if (m.find()) {
                         final String guess = m.group(REGEX_GROUP_NAME_PACKAGE);
@@ -1567,39 +1627,38 @@ public class MinimizeCodeBase {
         }
     }
 
-    static class RelativeJavaFileHelper {
-        final Path relativeTo;
-        final Map<Path, JavaFile> mapByPath;
+    static class CopiedJavaFileHelper {
+        final Path originalFolder;
+        final Path destinationFolder;
+        final Map<Path, CopiedJavaFile> mapByRelative;
 
-        RelativeJavaFileHelper(final Path relativeTo) {
-            this.relativeTo = relativeTo;
-            this.mapByPath = new LinkedHashMap<>();
+        CopiedJavaFileHelper(final Path originalFolder, final Path destinationFolder) {
+            this.originalFolder = originalFolder;
+            this.destinationFolder = destinationFolder;
+
+            this.mapByRelative = new LinkedHashMap<>();
         }
 
         void clear() {
-            this.mapByPath.clear();
+            this.mapByRelative.clear();
         }
 
-        JavaFile lookup(final JavaFileObject javaFileObject) {
-            return this.lookup(Paths.get(javaFileObject.getName()));
-        }
-
-        JavaFile lookup(final Path path) {
-            final Path fixedPath = path.startsWith(this.relativeTo)
-                    ? this.relativeTo.relativize(path)
-                    : path;
-            if ("sources".equals(this.relativeTo.toString())) {
-                return this.mapByPath.computeIfAbsent(path, k -> new JavaFile(fixedPath, this.relativeTo));
-            } else {
+        CopiedJavaFile lookup(final JavaFileObject javaFileObject) {
+            final Path javaFileObjectPath = Paths.get(javaFileObject.getName());
+            if (!javaFileObjectPath.startsWith(this.destinationFolder)) {
                 throw new UnsupportedOperationException(String.format(
-                        "%n" +
-                                "relative to:  %s%n" +
-                                "path:         %s%n" +
-                                "fixed:        %s%n",
-                        this.relativeTo,
-                        path,
-                        fixedPath));
+                        "javaFileObject is not part of this targetFolder%n" +
+                                "javaFileObject:  %s%n" +
+                                "targetFolder:    %s%n"));
             }
+            final Path relative = this.destinationFolder.relativize(javaFileObjectPath);
+            return this.lookup(relative);
+        }
+
+        CopiedJavaFile lookup(final Path relative) {
+            return this.mapByRelative.computeIfAbsent(
+                    relative,
+                    k -> new CopiedJavaFile(relative, this.originalFolder, this.destinationFolder));
         }
     }
 
@@ -1793,20 +1852,18 @@ public class MinimizeCodeBase {
             return asFileIterable(paths.stream());
         }
 
-        public static boolean isJavaSource(final Path p) {
-            return p.getFileName().toString().endsWith(JavaFileObject.Kind.SOURCE.extension);
-        }
-
         public static boolean isJar(final Path p) {
             return p.getFileName().toString().endsWith(".jar");
         }
 
-        public static Stream<? extends Path> streamListingWithPaths(final Path p) throws IOException {
-            return StaticHelpers.streamListing(p).map(Paths::get);
+        public static Stream<? extends Path> streamListingWithPaths(final Path listing) throws IOException {
+            return StaticHelpers.streamListing(listing).map(Paths::get);
         }
 
-        public static Stream<? extends String> streamListing(final Path p) throws IOException {
-            return Files.lines(p, UTF_8).filter(StaticHelpers::isNotCommentLine)
+        public static Stream<String> streamListing(final Path listing) throws IOException {
+            return Files
+                    .lines(listing, UTF_8)
+                    .filter(StaticHelpers::isNotCommentLine)
                     .filter(s -> !"".equals(s.trim()));
         }
 
@@ -1886,6 +1943,10 @@ public class MinimizeCodeBase {
             }
             b.append("\"");
             return b.toString();
+        }
+
+        public static String preparePathForListing(final Path p) {
+            return p.toString().replace(File.separatorChar, '/');
         }
     }
 }
