@@ -276,6 +276,7 @@ public class MinimizeCodeBase {
                     .entrySet()) {
                 final JavaName missingImport = entry.getKey();
                 final Set<CopiedJavaFile> javaFiles = entry.getValue();
+                this.out.println();
                 this.out.println(missingImport);
                 for (final CopiedJavaFile javaFile : javaFiles) {
                     this.out.println("  " + javaFile.forListing());
@@ -483,6 +484,11 @@ public class MinimizeCodeBase {
         // }
         // this.out.println();
         // }
+        // for (final CopiedJarFile jar :
+        // this.jarFileHelper.mapByOriginalRelative.values()) {
+        // this.out.show(" ", jar);
+        // this.out.println();
+        // }
     }
 
     protected void loadListings() throws IOException {
@@ -529,7 +535,7 @@ public class MinimizeCodeBase {
                 this.destinationClassesFolder.toFile(),
                 StaticHelpers.asFileIterable(this.javaFiles.stream().map(f -> f.destinationResolved)),
                 StaticHelpers.asFileIterable(this.sourcepaths.stream().map(this.destinationSourcesFolder::resolve)),
-                StaticHelpers.asFileIterable(this.jarNames.stream().map(this.destinationJarsFolder::resolve)));
+                StaticHelpers.asFileIterable(this.jarFiles.stream().map(f -> f.destinationResolved)));
     }
 
     protected void loadFiles() throws IOException {
@@ -559,24 +565,27 @@ public class MinimizeCodeBase {
     }
 
     protected void identifyJarFiles() {
+        this.jarFileHelper.clear();
+
         this.jarsToCopy.clear();
         this.jarsNotCopiedDueToNameCollision.clear();
-        this.jarNames.clear();
         this.nonJarDependencies.clear();
+
+        final Set<Path> jarNames = new LinkedHashSet<>();
 
         for (final String s : this.dependencies) {
             try {
-                final Path maybeJar = Paths.get(s);
-                final Path name = maybeJar.getFileName();
-                if (StaticHelpers.isJar(name)) {
-                    final Path definitelyJar = maybeJar;
-                    if (this.jarNames.contains(name)) {
-                        this.jarsNotCopiedDueToNameCollision.add(definitelyJar);
+                final Path originalRelative = Paths.get(s);
+                try {
+                    final CopiedJarFile jarFile = this.jarFileHelper.lookup(originalRelative);
+                    if (jarNames.contains(jarFile.fileName)) {
+                        this.jarsNotCopiedDueToNameCollision.add(originalRelative);
                     } else {
-                        this.jarsToCopy.add(definitelyJar);
-                        this.jarNames.add(name);
+                        this.jarsToCopy.add(originalRelative);
+                        this.jarFiles.add(jarFile);
+                        jarNames.add(jarFile.fileName);
                     }
-                } else {
+                } catch (final IllegalArgumentException e) {
                     this.nonJarDependencies.add(s);
                 }
             } catch (final InvalidPathException e) {
@@ -677,11 +686,16 @@ public class MinimizeCodeBase {
         this.dependencies = new ArrayList<>();
 
         // calculated collections (cleared at start of run)
-        this.javaFileHelper = new CopiedJavaFileHelper(this.originalFolder, this.destinationSourcesFolder);
+        this.javaFileHelper = new CopiedJavaFileHelper(
+                this.originalFolder,
+                this.destinationSourcesFolder);
         this.javaFiles = new ArrayList<>();
+        this.jarFileHelper = new CopiedJarFileHelper(
+                this.originalFolder,
+                this.destinationJarsFolder);
+        this.jarFiles = new ArrayList<>();
         this.jarsToCopy = new ArrayList<>();
         this.jarsNotCopiedDueToNameCollision = new ArrayList<>();
-        this.jarNames = new LinkedHashSet<>();
         this.nonJarDependencies = new ArrayList<>();
         this.sourcepathForJavaFile = new HashMap<>();
         this.packageForJavaFile = new HashMap<>();
@@ -710,17 +724,19 @@ public class MinimizeCodeBase {
     protected final Path destinationJarsFolder;
     protected final List<Path> sourcepaths;
     protected final List<Path> files;
-    protected final List<CopiedJavaFile> javaFiles;
     protected final List<String> dependencies;
 
+    protected final List<CopiedJavaFile> javaFiles;
     protected final CopiedJavaFileHelper javaFileHelper;
+
+    protected final List<CopiedJarFile> jarFiles;
+    protected final CopiedJarFileHelper jarFileHelper;
 
     protected final Map<CopiedJavaFile, Path> sourcepathForJavaFile;
     protected final Map<CopiedJavaFile, JavaName> packageForJavaFile;
     protected final Map<JavaName, Set<Path>> sourcepathsForPackage;
     protected final List<Path> jarsToCopy;
     protected final List<Path> jarsNotCopiedDueToNameCollision;
-    protected final Set<Path> jarNames;
     protected final List<String> nonJarDependencies;
     protected final Map<JavaName, DecodedDiagnostic> unresolvedQualifiedNames;
     protected final Map<String, DecodedDiagnostic> unresolvedPackages;
@@ -1501,6 +1517,7 @@ public class MinimizeCodeBase {
         final Path destinationFolder;
         final Path destinationRelative;
         final Path destinationResolved;
+        final Path fileName;
 
         CopiedFile(
                 final Path originalFolder,
@@ -1526,6 +1543,7 @@ public class MinimizeCodeBase {
             this.destinationFolder = destinationFolder;
             this.destinationRelative = destinationRelative;
             this.destinationResolved = destinationFolder.resolve(destinationRelative);
+            this.fileName = originalRelative.getFileName();
         }
 
         public LinkedHashMap<String, Object> getShowableProperties() {
@@ -1536,6 +1554,7 @@ public class MinimizeCodeBase {
             x.put("destinationFolder", this.destinationFolder);
             x.put("destinationRelative", this.destinationRelative);
             x.put("destinationResolved", this.destinationResolved);
+            x.put("fileName", this.fileName);
             return x;
         }
 
@@ -1659,6 +1678,53 @@ public class MinimizeCodeBase {
             return this.mapByRelative.computeIfAbsent(
                     relative,
                     k -> new CopiedJavaFile(relative, this.originalFolder, this.destinationFolder));
+        }
+    }
+
+    static class CopiedJarFile extends CopiedFile {
+        final static String EXTENSION = ".jar";
+        final static int EXTENSION_LENGTH = EXTENSION.length();
+
+        CopiedJarFile(final Path originalFolder, final Path originalRelative, final Path destinationFolder,
+                final Path destinationRelative) {
+            super(originalFolder, originalRelative, destinationFolder, destinationRelative);
+            if (!isJarFile(originalRelative)) {
+                throw new IllegalArgumentException(String.format(
+                        "does not end with \"%s\": %s",
+                        EXTENSION,
+                        originalRelative));
+            }
+        }
+
+        public static boolean isJarFile(final Path p) {
+            return p.getFileName().toString().endsWith(EXTENSION);
+        }
+    }
+
+    static class CopiedJarFileHelper {
+        final Path originalFolder;
+        final Path destinationFolder;
+        final Map<Path, CopiedJarFile> mapByOriginalRelative;
+
+        CopiedJarFileHelper(final Path originalFolder, final Path destinationFolder) {
+            this.originalFolder = originalFolder;
+            this.destinationFolder = destinationFolder;
+
+            this.mapByOriginalRelative = new LinkedHashMap<>();
+        }
+
+        void clear() {
+            this.mapByOriginalRelative.clear();
+        }
+
+        CopiedJarFile lookup(final Path originalRelative) {
+            return this.mapByOriginalRelative.computeIfAbsent(
+                    originalRelative,
+                    k -> new CopiedJarFile(
+                            this.originalFolder,
+                            originalRelative,
+                            this.destinationFolder,
+                            originalRelative.getFileName()));
         }
     }
 
@@ -1850,10 +1916,6 @@ public class MinimizeCodeBase {
 
         public static Iterable<? extends File> asFileIterable(final Collection<? extends Path> paths) {
             return asFileIterable(paths.stream());
-        }
-
-        public static boolean isJar(final Path p) {
-            return p.getFileName().toString().endsWith(".jar");
         }
 
         public static Stream<? extends Path> streamListingWithPaths(final Path listing) throws IOException {
