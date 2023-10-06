@@ -240,8 +240,9 @@ public class MinimizeCodeBase {
 
         ///////////////////////////////////////
 
-        // collect easy candidates
         /*
+         * collect easy candidates
+         *
          * Example 1
          * * when dest/sources/.../com/example/Foo.java uses simple symbol Bar
          * * and original...../.../com/example/Bar.java exists
@@ -269,26 +270,120 @@ public class MinimizeCodeBase {
             }
         }
 
-        // TODO find candidate imports using jar files from originalFolder
-        if (!missingImportsAndTheJavaFilesThatNeedThem.isEmpty()) {
+        // keep track of imports that were definitely not resolved,
+        final Set<JavaName> stillMissingImports = new LinkedHashSet<>(
+                missingImportsAndTheJavaFilesThatNeedThem.keySet());
+        // as well ones that might have been resolved
+        final Map<JavaName, Object> possiblyResolvedImports = new LinkedHashMap<>();
+
+        if (!stillMissingImports.isEmpty()) {
             this.out.println("---- lalala ----");
-            for (final Entry<JavaName, Set<CopiedJavaFile>> entry : missingImportsAndTheJavaFilesThatNeedThem
-                    .entrySet()) {
-                final JavaName missingImport = entry.getKey();
-                final Set<CopiedJavaFile> javaFiles = entry.getValue();
-                this.out.println();
-                this.out.println(missingImport);
-                for (final CopiedJavaFile javaFile : javaFiles) {
-                    this.out.println("  " + javaFile.forListing());
-                    if (javaFile.packageName.isPresent()) {
-                        this.out.println("    " + javaFile.packageName.get().toString());
-                    } else {
-                        this.out.println("    <unguessed package>");
+
+            // TODO resolve imports by searching for java files based on matching names
+            if (!stillMissingImports.isEmpty()) {
+                for (final JavaName missingImport : stillMissingImports) {
+                    for (final CopiedJavaFile specifiedJavaFile : missingImportsAndTheJavaFilesThatNeedThem
+                            .get(missingImport)) {
+                        // TODO start search in sourcepaths for already copied java files
+                        // TODO this requires sourcepaths to be guessed?
                     }
                 }
-                // Files.find(classesFolder, javaFileLimit, null, null);
             }
-            this.out.println();
+
+            // resolve imports using jar files from originalFolder
+            if (!stillMissingImports.isEmpty()) {
+                // get set of original folders that have jar files that we already copied
+                final Set<Path> originalFoldersThatHaveJarFiles = new LinkedHashSet<>();
+                for (final CopiedJarFile specifiedJarFile : this.jarFileHelper.mapByOriginalRelative.values()) {
+                    originalFoldersThatHaveJarFiles.add(specifiedJarFile.originalResolved.getParent());
+                }
+
+                // get set of jar files that are in those same folders,
+                // other than the ones we already copied
+                final Set<CopiedJarFile> otherJarFiles = new LinkedHashSet<>();
+                final CopiedJarFileHelper otherJarFileHelper = new CopiedJarFileHelper(
+                        this.jarFileHelper.originalFolder,
+                        this.jarFileHelper.destinationFolder);
+                for (final Path originalFolder : originalFoldersThatHaveJarFiles) {
+                    try {
+                        final Iterator<Path> it = Files
+                                .find(
+                                        originalFolder,
+                                        1,
+                                        (file, attr) -> CopiedJarFile.isJarFile(file))
+                                .iterator();
+                        while (it.hasNext()) {
+                            final Path originalResolved = it.next();
+                            final Path originalRelative = otherJarFileHelper.originalFolder
+                                    .relativize(originalResolved);
+                            final CopiedJarFile otherJarFile = otherJarFileHelper.lookup(originalRelative);
+                            if (!this.jarFileHelper.mapByOriginalRelative.containsKey(originalRelative)) {
+                                otherJarFiles.add(otherJarFile);
+                            }
+                        }
+                    } catch (final IOException e) {
+                        // TODO Auto-generated catch block
+                        e.printStackTrace();
+                    }
+
+                }
+
+                // build set of candidate jar files that resolve missing imports
+                // move jar files from otherJarFiles to candidateJarFiles... as we go
+                final Map<CopiedJarFile, Set<JavaName>> candidateJarFilesAndResolvedImports = new LinkedHashMap<>();
+                for (final JavaName missingImport : new LinkedHashSet<>(stillMissingImports)) {
+                    // DEBUG: this.out.println("** " + missingImport.name);
+
+                    // check candidates first, then others
+                    CopiedJarFile foundCandidate = null;
+                    // clumsy performance tweak: most recently added candidate first
+                    final ArrayList<CopiedJarFile> reversedCandidates = new ArrayList<>(
+                            candidateJarFilesAndResolvedImports.keySet());
+                    Collections.reverse(reversedCandidates);
+                    for (final CopiedJarFile candidateJarFile : reversedCandidates) {
+                        // DEBUG: this.out.println("** -- javap: " +
+                        // candidateJarFile.fileName.toString());
+                        if (candidateJarFile.originalContainsType(missingImport)) {
+                            foundCandidate = candidateJarFile;
+                            break;
+                        }
+                    }
+                    if (null == foundCandidate) {
+                        for (final CopiedJarFile otherJarFile : otherJarFiles) {
+                            // DEBUG: this.out.println("** -- javap: " + otherJarFile.fileName.toString());
+                            if (otherJarFile.originalContainsType(missingImport)) {
+                                foundCandidate = otherJarFile;
+                                break;
+                            }
+                        }
+                    }
+                    if (null != foundCandidate) {
+                        // DEBUG: this.out.println("** !!: " + foundCandidate.fileName.toFile());
+                        stillMissingImports.remove(missingImport);
+                        possiblyResolvedImports.put(missingImport, foundCandidate);
+                        candidateJarFilesAndResolvedImports
+                                .computeIfAbsent(
+                                        foundCandidate,
+                                        k -> new LinkedHashSet<>())
+                                .add(missingImport);
+                        otherJarFiles.remove(foundCandidate);
+                    }
+                }
+
+                // TODO continue search for jar files in other places?
+                // (eg, when dependencies.lst has no starter jar files)
+
+                // show candidate jar files
+                for (final Entry<CopiedJarFile, Set<JavaName>> entry : candidateJarFilesAndResolvedImports.entrySet()) {
+                    final CopiedJarFile candidate = entry.getKey();
+                    this.out.println();
+                    this.out.println(candidate.forListing());
+                    for (final JavaName missingImport : entry.getValue()) {
+                        this.out.println("# * " + missingImport.name);
+                    }
+                }
+                this.out.println();
+            }
         }
 
         ///////////////////////////////////////
@@ -1276,22 +1371,6 @@ public class MinimizeCodeBase {
     // }
     // }
 
-    public static boolean jarContainsType(final Path jar, final JavaName typeName) {
-        final ProcessBuilder pb = new ProcessBuilder(
-                "javap",
-                "-cp",
-                jar.toString(),
-                typeName.toString());
-        try {
-            final Process proc = pb.start();
-            return 0 == proc.waitFor();
-        } catch (final InterruptedException | IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-            return false;
-        }
-    }
-
     // public static List<Path> guessSourcepathFromJavaFile(final Path javaFile) {
     // if (null == javaFile || null == javaFile.getParent()) {
     // return Collections.emptyList();
@@ -1696,7 +1775,23 @@ public class MinimizeCodeBase {
             }
         }
 
-        public static boolean isJarFile(final Path p) {
+        boolean originalContainsType(final JavaName typeName) {
+            final ProcessBuilder pb = new ProcessBuilder(
+                    "javap",
+                    "-cp",
+                    this.originalResolved.toString(),
+                    typeName.toString());
+            try {
+                final Process proc = pb.start();
+                return 0 == proc.waitFor();
+            } catch (final InterruptedException | IOException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+        static boolean isJarFile(final Path p) {
             return p.getFileName().toString().endsWith(EXTENSION);
         }
     }
