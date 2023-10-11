@@ -189,7 +189,8 @@ public class MinimizeCodeBase {
                             javaFilesWithMissingSymbols,
                             javaFile,
                             decoded.packageName);
-                } else if (ErrorCode.CANT_RESOLVE_LOCATION == code
+                } else if ((ErrorCode.CANT_RESOLVE_LOCATION == code
+                        || ErrorCode.CANT_RESOLVE == code)
                         && ErrorCategory.CANNOT_FIND_SYMBOL == decoded.category
                         && null != decoded.symbol) {
                     /*
@@ -212,9 +213,14 @@ public class MinimizeCodeBase {
                                 decoded.symbol);
                     }
                 } else {
-                    this.out.show("code", code);
-                    this.out.show("  ", decoded);
-                    this.out.println(error.toString().replaceAll("(?m)^", "> "));
+                    this.out.println("/*");
+                    this.out.show(" * ", "code", code);
+                    this.out.println(" *");
+                    this.out.show(" * ", decoded);
+                    this.out.println(" *");
+                    this.out.println(error.toString().replaceAll("(?m)^", " * > "));
+                    this.out.println(" */");
+                    this.out.println();
                     break;
                 }
             }
