@@ -101,6 +101,9 @@ public class MinimizeCodeBase {
                                 e.getKey()));
                 for (final Diagnostic<? extends JavaFileObject> error : errors) {
                     errorsPrinter.println("----------------");
+                    errorsPrinter.print("kind:  ");
+                    errorsPrinter.println(error.getKind());
+                    errorsPrinter.print("code:  ");
                     errorsPrinter.println(error.getCode());
                     errorsPrinter.println();
                     errorsPrinter.println(error.toString().replaceFirst(
@@ -141,6 +144,7 @@ public class MinimizeCodeBase {
                 if (1 != decodedDiagnostics.size()) {
                     this.out.println("---- expected one decoded diagnostic ----");
                     this.out.show("decoded #", decodedDiagnostics.size());
+                    this.out.show("code", error.getCode());
                     this.out.println(error.toString().replaceAll("(?m)^", "> "));
                     for (final DecodedDiagnostic dd : decodedDiagnostics) {
                         this.out.println();
@@ -1012,50 +1016,69 @@ public class MinimizeCodeBase {
     static {
         final Map<ErrorCode, Map<ErrorCategory, Map<String, Pattern>>> temp = new LinkedHashMap<>();
 
-        final Map<ErrorCategory, Map<String, Pattern>> doesntExistMap = new LinkedHashMap<>();
+        {
+            final Map<ErrorCategory, Map<String, Pattern>> doesntExistMap = new LinkedHashMap<>();
+            final Map<String, Pattern> packageDoesNotExistMap = new LinkedHashMap<>();
+            putPatternForPackageDoesNotExist(
+                    packageDoesNotExistMap,
+                    "import",
+                    "\\bimport\\s+",
+                    null);
+            putPatternForPackageDoesNotExist(
+                    packageDoesNotExistMap,
+                    null,
+                    null,
+                    null);
+            doesntExistMap.put(ErrorCategory.PACKAGE_DOES_NOT_EXIST, packageDoesNotExistMap);
+            temp.put(
+                    ErrorCode.DOESNT_EXIST,
+                    Collections.unmodifiableMap(doesntExistMap));
+        }
 
-        final Map<String, Pattern> packageDoesNotExistMap = new LinkedHashMap<>();
-        putPatternForPackageDoesNotExist(
-                packageDoesNotExistMap,
-                "import",
-                "\\bimport\\s+",
-                null);
-        putPatternForPackageDoesNotExist(
-                packageDoesNotExistMap,
-                null,
-                null,
-                null);
-        doesntExistMap.put(ErrorCategory.PACKAGE_DOES_NOT_EXIST, packageDoesNotExistMap);
+        {
+            final Map<ErrorCategory, Map<String, Pattern>> cantResolveLocationMap = new LinkedHashMap<>();
+            final Map<String, Pattern> cannotFindSymbolMap = new LinkedHashMap<>();
+            putPatternForCannotFindSymbolLocation(
+                    cannotFindSymbolMap,
+                    ErrorSymbolType.CLASS,
+                    ErrorLocationType.CLASS,
+                    JAVA_QUALIFIED_NAME_REGEX);
+            putPatternForCannotFindSymbolLocation(
+                    cannotFindSymbolMap,
+                    ErrorSymbolType.VARIABLE,
+                    ErrorLocationType.CLASS,
+                    JAVA_QUALIFIED_NAME_REGEX);
+            putPatternForCannotFindSymbolLocation(
+                    cannotFindSymbolMap,
+                    ErrorSymbolType.CLASS,
+                    ErrorLocationType.PACKAGE,
+                    JAVA_PACKAGE_REGEX_GROUP);
+            cantResolveLocationMap.put(
+                    ErrorCategory.CANNOT_FIND_SYMBOL,
+                    Collections.unmodifiableMap(cannotFindSymbolMap));
+            temp.put(
+                    ErrorCode.CANT_RESOLVE_LOCATION,
+                    Collections.unmodifiableMap(cantResolveLocationMap));
+        }
 
-        temp.put(
-                ErrorCode.DOESNT_EXIST,
-                Collections.unmodifiableMap(doesntExistMap));
-
-        final Map<ErrorCategory, Map<String, Pattern>> cantResolveLocationMap = new LinkedHashMap<>();
-
-        final Map<String, Pattern> cannotFindSymbolMap = new LinkedHashMap<>();
-        putPatternForCannotFindSymbolLocation(
-                cannotFindSymbolMap,
-                ErrorSymbolType.CLASS,
-                ErrorLocationType.CLASS,
-                JAVA_QUALIFIED_NAME_REGEX);
-        putPatternForCannotFindSymbolLocation(
-                cannotFindSymbolMap,
-                ErrorSymbolType.VARIABLE,
-                ErrorLocationType.CLASS,
-                JAVA_QUALIFIED_NAME_REGEX);
-        // putPatternForCannotFindSymbolLocation(
-        // cannotFindSymbolMap,
-        // ErrorSymbolType.CLASS,
-        // ErrorLocationType.PACKAGE,
-        // JAVA_PACKAGE_REGEX_GROUP);
-        cantResolveLocationMap.put(
-                ErrorCategory.CANNOT_FIND_SYMBOL,
-                Collections.unmodifiableMap(cannotFindSymbolMap));
-
-        temp.put(
-                ErrorCode.CANT_RESOLVE_LOCATION,
-                Collections.unmodifiableMap(cantResolveLocationMap));
+        {
+            final Map<ErrorCategory, Map<String, Pattern>> cantResolveMap = new LinkedHashMap<>();
+            final Map<String, Pattern> cannotFindSymbolMap = new LinkedHashMap<>();
+            putPatternForCannotFindSymbol(
+                    cannotFindSymbolMap,
+                    ErrorSymbolType.CLASS);
+            // putPatternForCannotFindSymbol(
+            // cannotFindSymbolMap,
+            // ErrorSymbolType.VARIABLE,
+            // ErrorLocationType.CLASS,
+            // JAVA_QUALIFIED_NAME_REGEX);
+            cantResolveMap.put(
+                    ErrorCategory.CANNOT_FIND_SYMBOL,
+                    Collections.unmodifiableMap(cannotFindSymbolMap));
+            temp.put(
+                    ErrorCode.CANT_RESOLVE,
+                    Collections.unmodifiableMap(cantResolveMap));
+        }
 
         PATTERNS_FOR_COMPILER_ERR = Collections.unmodifiableMap(temp);
     }
@@ -1102,6 +1125,21 @@ public class MinimizeCodeBase {
                 + symbolRegex
                 + "\\s+"
                 + locationRegex;
+        putPattern(map, key, regex);
+    }
+
+    private static void putPatternForCannotFindSymbol(
+            final Map<String, Pattern> map,
+            final ErrorSymbolType symbolType) {
+        final String key = String.format("%s", symbolType);
+        final String symbolRegex = String.format(
+                "symbol:\\s+(?<%s>%s)\\s+(?<%s>%s)",
+                REGEX_GROUP_NAME_KEYWORD,
+                symbolType,
+                REGEX_GROUP_NAME_SYMBOL,
+                JAVA_IDENTIFIER_REGEX);
+        final String regex = "\\bcannot find symbol\\s+"
+                + symbolRegex;
         putPattern(map, key, regex);
     }
 
@@ -1345,6 +1383,7 @@ public class MinimizeCodeBase {
     // }
 
     static enum ErrorCode {
+        CANT_RESOLVE("compiler.err.cant.resolve"),
         CANT_RESOLVE_LOCATION("compiler.err.cant.resolve.location"),
         DOESNT_EXIST("compiler.err.doesnt.exist");
 
@@ -2039,7 +2078,7 @@ public class MinimizeCodeBase {
             final List<Diagnostic<? extends JavaFileObject>> errors = collector
                     .getDiagnostics()
                     .stream()
-                    .filter(d -> 0 >= Diagnostic.Kind.ERROR.compareTo(d.getKind()))
+                    .filter(d -> 0 <= Diagnostic.Kind.ERROR.compareTo(d.getKind()))
                     .collect(Collectors.toList());
             final CompilationResult result = new CompilationResult(
                     wasSuccessful,
