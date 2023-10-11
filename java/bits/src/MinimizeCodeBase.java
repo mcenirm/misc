@@ -87,7 +87,7 @@ public class MinimizeCodeBase {
                 i++;
                 final Entry<JavaFileObject, List<Diagnostic<? extends JavaFileObject>>> entry = entries.next();
                 final JavaFileObject source = entry.getKey();
-                final CopiedJavaFile javaFile = this.javaFileHelper.lookup(source);
+                final CopiedJavaFile javaFile = this.pathHelper.lookupJavaFile(source);
                 final List<Diagnostic<? extends JavaFileObject>> errors = entry.getValue();
                 errorsByJavaFile.put(javaFile, errors);
                 this.out.println(javaFile.forListing());
@@ -128,8 +128,8 @@ public class MinimizeCodeBase {
         ///////////////////////////////////////
 
         // for each java file, look at errors and guess dependencies
-        final Map<JavaName, Set<CopiedJavaFile>> missingImportsAndTheJavaFilesThatNeedThem = new LinkedHashMap<>();
         final Map<CopiedJavaFile, Set<JavaName>> javaFilesWithMissingSymbols = new LinkedHashMap<>();
+        final Map<CopiedJavaFile, Set<JavaName>> javaFilesWithMissingImports = new LinkedHashMap<>();
         for (final Entry<CopiedJavaFile, List<Diagnostic<? extends JavaFileObject>>> entry : errorsByJavaFile
                 .entrySet()) {
             final CopiedJavaFile javaFile = entry.getKey();
@@ -166,9 +166,10 @@ public class MinimizeCodeBase {
                     if (null != previousImportedType && !previousImportedType.equals(importedType)) {
                         this.out.show("collision", previousImportedType + " vs " + importedType);
                     }
-                    missingImportsAndTheJavaFilesThatNeedThem
-                            .computeIfAbsent(importedType, k -> new LinkedHashSet<>())
-                            .add(javaFile);
+                    StaticHelpers.addMapSet(
+                            javaFilesWithMissingImports,
+                            javaFile,
+                            importedType);
                 } else if (ErrorCode.DOESNT_EXIST == code
                         && ErrorCategory.PACKAGE_DOES_NOT_EXIST == decoded.category
                         && null != decoded.packageName
@@ -180,9 +181,10 @@ public class MinimizeCodeBase {
                      * Without "import", this is probably a multi-level member access to a type in
                      * the same source package. (eg, "Foo.someStaticMember.someMember")
                      */
-                    javaFilesWithMissingSymbols
-                            .computeIfAbsent(javaFile, k -> new LinkedHashSet<>())
-                            .add(decoded.packageName);
+                    StaticHelpers.addMapSet(
+                            javaFilesWithMissingSymbols,
+                            javaFile,
+                            decoded.packageName);
                 } else if (ErrorCode.CANT_RESOLVE_LOCATION == code
                         && ErrorCategory.CANNOT_FIND_SYMBOL == decoded.category
                         && null != decoded.symbol) {
@@ -198,11 +200,12 @@ public class MinimizeCodeBase {
                      * the same source package. (eg, "Foo.someStaticMember")
                      */
                     if (importsBySymbolForCurrentJavaFile.containsKey(decoded.symbol)) {
-                        // ignore, since fixing import would fix this reference to it
+                        // ignore, since fixing import should fix this reference to it
                     } else {
-                        javaFilesWithMissingSymbols
-                                .computeIfAbsent(javaFile, k -> new LinkedHashSet<>())
-                                .add(decoded.symbol);
+                        StaticHelpers.addMapSet(
+                                javaFilesWithMissingSymbols,
+                                javaFile,
+                                decoded.symbol);
                     }
                 } else {
                     this.out.show("code", code);
@@ -216,78 +219,206 @@ public class MinimizeCodeBase {
         ///////////////////////////////////////
 
         // list missing symbols and imports
-        if (!javaFilesWithMissingSymbols.isEmpty()) {
-            this.out.println("---- missing symbols by java file ----");
-            for (final Entry<CopiedJavaFile, Set<JavaName>> entry : javaFilesWithMissingSymbols.entrySet()) {
-                final CopiedJavaFile javaFile = entry.getKey();
-                final Set<JavaName> symbols = entry.getValue();
+        final Set<CopiedJavaFile> javaFilesWithErrors = new LinkedHashSet<>(errorsByJavaFile.keySet());
+        if (!javaFilesWithMissingSymbols.isEmpty() || !javaFilesWithMissingImports.isEmpty()) {
+            this.out.println("---- missing symbols or imports by java file ----");
+            for (final CopiedJavaFile javaFile : javaFilesWithErrors) {
                 this.out.println(javaFile.forListing());
-                if (!symbols.isEmpty()) {
-                    for (final JavaName symbol : symbols) {
-                        this.out.println("  " + symbol);
-                    }
+                for (final JavaName missingSymbol : javaFilesWithMissingSymbols
+                        .getOrDefault(javaFile, Collections.emptySet())) {
+                    this.out.println("  " + missingSymbol.name);
                 }
+                for (final JavaName missingImport : javaFilesWithMissingImports
+                        .getOrDefault(javaFile, Collections.emptySet())) {
+                    this.out.println("  " + missingImport.name);
+                }
+                this.out.println();
             }
-            this.out.println();
-        }
-        if (!missingImportsAndTheJavaFilesThatNeedThem.isEmpty()) {
-            this.out.println("---- missing imports ----");
-            for (final JavaName missingImport : missingImportsAndTheJavaFilesThatNeedThem.keySet()) {
-                this.out.println(missingImport);
-            }
-            this.out.println();
         }
 
         ///////////////////////////////////////
 
         /*
-         * collect easy candidates
-         *
-         * Example 1
-         * * when dest/sources/.../com/example/Foo.java uses simple symbol Bar
-         * * and original...../.../com/example/Bar.java exists
-         * * then suggest....: .../com/example/Bar.java
+         * Keep track of missing symbols and imports that remain unresolved.
+         * Coallesce by package folder, if present.
+         * Otherwise, keep track by java file.
          */
-        final Set<CopiedJavaFile> candidateJavaFiles = new LinkedHashSet<>();
-        if (!javaFilesWithMissingSymbols.isEmpty()) {
-            for (final Entry<CopiedJavaFile, Set<JavaName>> entry : javaFilesWithMissingSymbols.entrySet()) {
-                final CopiedJavaFile javaFile = entry.getKey();
-                final Set<JavaName> symbols = entry.getValue();
-                if (!symbols.isEmpty()) {
-                    final Path originalPackageFolder = javaFile.originalResolved.getParent();
-                    final Path relativePackageFolder = javaFile.relative.getParent();
-                    for (final JavaName symbol : symbols) {
-                        if (symbol.isSimpleName) {
-                            final String fileName = symbol.name + CopiedJavaFile.EXTENSION;
-                            final Path originalCandidate = originalPackageFolder.resolve(fileName);
-                            if (Files.exists(originalCandidate)) {
-                                final Path relativeCandidate = relativePackageFolder.resolve(fileName);
-                                candidateJavaFiles.add(this.javaFileHelper.lookup(relativeCandidate));
-                            }
-                        }
-                    }
+        final Map<CopiedJavaPackageFolder, Set<JavaName>> stillMissingByPackage = new LinkedHashMap<>();
+        final Map<CopiedJavaFile, Set<JavaName>> stillMissingByJavaFile = new LinkedHashMap<>();
+        for (final CopiedJavaFile javaFile : javaFilesWithErrors) {
+            final Set<JavaName> set = javaFile.packageFolder.isPresent()
+                    ? stillMissingByPackage
+                            .computeIfAbsent(javaFile.packageFolder.get(), k -> new LinkedHashSet<>())
+                    : stillMissingByJavaFile
+                            .computeIfAbsent(javaFile, k -> new LinkedHashSet<>());
+            set.addAll(javaFilesWithMissingSymbols
+                    .getOrDefault(javaFile, Collections.emptySet()));
+            set.addAll(javaFilesWithMissingImports
+                    .getOrDefault(javaFile, Collections.emptySet()));
+        }
+
+        /*
+         * Keep track of possible resolutions to missing symbols and imports.
+         */
+        final Map<CopiedJavaPackageFolder, Map<JavaName, Object>> possiblyResolvedByPackage = new LinkedHashMap<>();
+        final Map<CopiedJavaFile, Map<JavaName, Object>> possiblyResolvedByJavaFile = new LinkedHashMap<>();
+
+        /*
+         * Keep track of missing symbols and imports that seem to correspond
+         * to java files that exist in the original folder.
+         */
+        final Map<JavaName, Set<CopiedJavaFile>> candidateJavaFilesByName = new LinkedHashMap<>();
+
+        /*
+         * Collect easy candidates
+         */
+        for (final CopiedJavaFile javaFile : javaFilesWithErrors) {
+            final Set<JavaName> missingSymbolsForCurrentJavaFile = javaFilesWithMissingSymbols
+                    .getOrDefault(javaFile, Collections.emptySet());
+            final Set<JavaName> missingImportsForCurrentJavaFile = javaFilesWithMissingImports
+                    .getOrDefault(javaFile, Collections.emptySet());
+            final CopiedSourcepathFolder sourcepath;
+            final Set<JavaName> stillMissing;
+            final Map<JavaName, Object> possiblyResolved;
+            if (javaFile.packageFolder.isPresent()) {
+                final CopiedJavaPackageFolder pf = javaFile.packageFolder.get();
+                sourcepath = pf.sourcepath;
+                stillMissing = stillMissingByPackage
+                        .getOrDefault(pf, Collections.emptySet());
+                possiblyResolved = possiblyResolvedByPackage
+                        .computeIfAbsent(pf, k -> new LinkedHashMap<>());
+            } else {
+                sourcepath = this.pathHelper.lookupSourcepathFolder(javaFile.relative.getParent());
+                stillMissing = stillMissingByJavaFile
+                        .getOrDefault(javaFile, Collections.emptySet());
+                possiblyResolved = possiblyResolvedByJavaFile
+                        .computeIfAbsent(javaFile, k -> new LinkedHashMap<>());
+            }
+
+            /*
+             * when dest/sources/<.../Foo.java> uses simple symbol <Bar>
+             * .... and original/<.../Bar.java> exists
+             * ... then suggest: <.../Bar.java>
+             */
+            for (final JavaName missingSymbol : missingSymbolsForCurrentJavaFile) {
+                // TODO Is there anything we can do for qualified names?
+                // Possibilities:
+                // * reference to static member of type
+                // * direct reference to unimported type
+                // * others?
+                final JavaName name = missingSymbol.isSimpleName
+                        ? javaFile.packageFolder.isPresent()
+                                ? javaFile.packageFolder.get().name.qualify(missingSymbol)
+                                : missingSymbol
+                        : missingSymbol;
+                final CopiedJavaFile candidate = this.pathHelper
+                        .lookupJavaFile(sourcepath.relative.resolve(name.asJavaFilePath()));
+                if (candidate.originalExists()) {
+                    StaticHelpers.addMapSet(
+                            candidateJavaFilesByName,
+                            missingSymbol,
+                            candidate);
+                    // let earlier candidate win for symbol
+                    possiblyResolved.putIfAbsent(missingSymbol, candidate);
+                    stillMissing.remove(missingSymbol);
+                    // this.out.println("debug: " + candidate.forListing());
+                }
+            }
+
+            /*
+             * when dest/sources/<.../foo/Foo.java> imports <bar.Bar>
+             * .... and original/<.../bar/Bar.java> exists
+             * ... then suggest: <.../bar/Bar.java>
+             */
+            for (final JavaName missingImport : missingImportsForCurrentJavaFile) {
+                final CopiedJavaFile candidate = this.pathHelper
+                        .lookupJavaFile(sourcepath.relative.resolve(missingImport.asJavaFilePath()));
+                if (candidate.originalExists()) {
+                    StaticHelpers.addMapSet(
+                            candidateJavaFilesByName,
+                            missingImport,
+                            candidate);
+                    // let earlier candidate win for import
+                    possiblyResolved.putIfAbsent(missingImport, candidate);
+                    stillMissing.remove(missingImport);
+                }
+            }
+
+            // prune if empty
+            if (javaFile.packageFolder.isPresent()) {
+                final CopiedJavaPackageFolder pf = javaFile.packageFolder.get();
+                if (stillMissing.isEmpty()) {
+                    stillMissingByPackage.remove(pf);
+                }
+                if (possiblyResolved.isEmpty()) {
+                    possiblyResolvedByPackage.remove(pf);
+                }
+            } else {
+                if (stillMissing.isEmpty()) {
+                    stillMissingByJavaFile.remove(javaFile);
+                }
+                if (possiblyResolved.isEmpty()) {
+                    possiblyResolvedByJavaFile.remove(javaFile);
                 }
             }
         }
 
-        // keep track of imports that were definitely not resolved,
-        final Set<JavaName> stillMissingImports = new LinkedHashSet<>(
-                missingImportsAndTheJavaFilesThatNeedThem.keySet());
-        // as well ones that might have been resolved
-        final Map<JavaName, Object> possiblyResolvedImports = new LinkedHashMap<>();
+        /**
+         * Collect harder candidates
+         * * java files in other source paths under the original folder
+         * * jar files under the original folder
+         */
+        if (!stillMissingByPackage.isEmpty() || !stillMissingByJavaFile.isEmpty()) {
+            // TODO unify stillMissingByPackage and stillMissingByJavaFile?
 
-        if (!stillMissingImports.isEmpty()) {
-            this.out.println("---- lalala ----");
+            final Set<JavaName> stillMissingImports = new LinkedHashSet<>();
+            for (final Set<JavaName> names : stillMissingByPackage.values()) {
+                for (final JavaName name : names) {
+                    if (!name.isSimpleName) {
+                        stillMissingImports.add(name);
+                    }
+                }
+            }
+            for (final Set<JavaName> names : stillMissingByJavaFile.values()) {
+                for (final JavaName name : names) {
+                    if (!name.isSimpleName) {
+                        stillMissingImports.add(name);
+                    }
+                }
+            }
+
+            final Map<JavaName, Object> possiblyResolvedImports = new LinkedHashMap<>();
+
+            this.out.format(
+                    "---- searching original folder for %d missing imports ----%n",
+                    stillMissingImports.size());
 
             // TODO resolve imports by searching for java files based on matching names
             if (!stillMissingImports.isEmpty()) {
+                final Set<Path> javaFileNamesToSearchFor = new LinkedHashSet<>();
                 for (final JavaName missingImport : stillMissingImports) {
-                    for (final CopiedJavaFile specifiedJavaFile : missingImportsAndTheJavaFilesThatNeedThem
-                            .get(missingImport)) {
-                        // TODO start search in sourcepaths for already copied java files
-                        // TODO this requires sourcepaths to be guessed?
-                    }
+                    javaFileNamesToSearchFor.add(missingImport.asJavaFilePath().getFileName());
                 }
+                final Set<CopiedJavaFile> candidatesFound = Files.find(
+                        this.originalFolder,
+                        Integer.MAX_VALUE,
+                        (path, attr) -> {
+                            return javaFileNamesToSearchFor.contains(path.getFileName());
+                        })
+                        .map(p -> this.pathHelper.lookupJavaFile(this.pathHelper.originalFolder.relativize(p)))
+                        .filter(f -> stillMissingImports.contains(f.qualifiedName.orElse(null)))
+                        .collect(Collectors.toSet());
+                for (final CopiedJavaFile candidate : candidatesFound) {
+                    final JavaName possiblyResolvedImport = candidate.qualifiedName.get();
+                    StaticHelpers.addMapSet(
+                            candidateJavaFilesByName,
+                            possiblyResolvedImport,
+                            candidate);
+                    stillMissingImports.remove(possiblyResolvedImport);
+                    // TOOD add candidate to possiblyResolvedByPackage or possiblyResolvedByJavaFile
+                }
+                // TODO remove any entries in stillMissingImports from
+                // stillMissingByPackage or stillMissingByJavaFile
             }
 
             // resolve imports using jar files from originalFolder
@@ -361,11 +492,10 @@ public class MinimizeCodeBase {
                         // DEBUG: this.out.println("** !!: " + foundCandidate.fileName.toFile());
                         stillMissingImports.remove(missingImport);
                         possiblyResolvedImports.put(missingImport, foundCandidate);
-                        candidateJarFilesAndResolvedImports
-                                .computeIfAbsent(
-                                        foundCandidate,
-                                        k -> new LinkedHashSet<>())
-                                .add(missingImport);
+                        StaticHelpers.addMapSet(
+                                candidateJarFilesAndResolvedImports,
+                                foundCandidate,
+                                missingImport);
                         otherJarFiles.remove(foundCandidate);
                     }
                 }
@@ -388,202 +518,19 @@ public class MinimizeCodeBase {
 
         ///////////////////////////////////////
 
-        if (!candidateJavaFiles.isEmpty()) {
+        if (!candidateJavaFilesByName.isEmpty()) {
             this.out.println("---- candidate java files ----");
-            for (final CopiedJavaFile candidate : candidateJavaFiles) {
-                this.out.println(candidate.forListing());
+            for (final Entry<JavaName, Set<CopiedJavaFile>> entry : candidateJavaFilesByName.entrySet()) {
+                // this.out.println("# " + entry.getKey().name);
+                for (final CopiedJavaFile candidate : entry.getValue()) {
+                    this.out.println(candidate.forListing());
+                }
+                // this.out.println("#");
             }
             this.out.println();
         }
 
         ///////////////////////////////////////
-
-        // int unmatchedErrorCount = 0;
-        // JavaFileObject previousSource = null;
-        // for (final Diagnostic<? extends JavaFileObject> diag :
-        // this.compilationResult.errors) {
-        // if (Diagnostic.Kind.ERROR == diag.getKind()) {
-        // unmatchedErrorCount++;
-        // final ErrorCode code = ErrorCode.fromText(diag.getCode());
-        // final JavaFileObject source = diag.getSource();
-        // if (null != previousSource && !previousSource.equals(source)) {
-        // break;
-        // }
-        // if (!this.unresolvedPackagesForSymbolsBySource.containsKey(source)) {
-        // this.unresolvedPackagesForSymbolsBySource.put(source, new LinkedHashMap<>());
-        // }
-        // final Map<String, Set<String>> unresolvedPackagesForSymbols =
-        // this.unresolvedPackagesForSymbolsBySource
-        // .get(source);
-        // final Map<String, String> resolvedPackageForSymbol = new LinkedHashMap<>();
-
-        // final DecodedDiagnostic dd = decodedDiagnostics.get(0);
-        // boolean matched = true;
-        // if (ErrorCode.DOESNT_EXIST == code
-        // && null != dd.packageName
-        // && null != dd.typename) {
-        // this.unresolvedPackages.put(dd.packageName, dd);
-        // if (null != dd.symbol) {
-        // if (!resolvedPackageForSymbol.containsKey(dd.symbol)) {
-        // if (!unresolvedPackagesForSymbols.containsKey(dd.symbol)) {
-        // unresolvedPackagesForSymbols.put(dd.symbol, new LinkedHashSet<>());
-        // }
-        // unresolvedPackagesForSymbols.get(dd.symbol).add(dd.packageName);
-        // }
-        // }
-        // } else if (ErrorCode.CANT_RESOLVE_LOCATION == code
-        // && JAVA_KEYWORD_CLASS.equals(dd.keyword)
-        // && null != dd.symbol
-        // && unresolvedPackagesForSymbols.containsKey(dd.symbol)) {
-        // final Set<String> packageSet = unresolvedPackagesForSymbols.get(dd.symbol);
-        // if (packageSet.size() > 1) {
-
-        // }
-        // // this.unresolvedQualifiedNames
-        // } else {
-        // matched = false;
-        // }
-        // if (matched) {
-        // this.codeScores.merge(code.text, 1, Integer::sum);
-        // unmatchedErrorCount--;
-        // } else {
-        // this.out.println("----------");
-        // this.out.show("code", code);
-        // // this.out.show("source", source.getName());
-        // this.out.show("message", StaticHelpers.escape(diag.getMessage(null)));
-        // this.out.println("--");
-        // this.out.println(diag);
-        // // this.out.println("--");
-        // this.out.println("----------");
-        // this.out.show(dd);
-        // this.out.println();
-        // }
-
-        // final Path guessJavaFile = null;
-        // String guessPackage = null;
-        // if (null != guessJavaFile) {
-        // if (null == guessPackage) {
-        // guessPackage = this.getPackageForJavaFile(guessJavaFile);
-        // }
-        // final Set<Path> guessSourcepaths =
-        // this.getSourcepathsForPackage(guessPackage);
-        // if (!guessSourcepaths.isEmpty()) {
-        // for (final Path guessSourcePath : guessSourcepaths) {
-        // this.suggestedJavaFiles.add(guessSourcePath.resolve(guessJavaFile));
-        // }
-        // } else {
-        // boolean foundJavaFile = false;
-        // for (final Path sp : this.sourcepaths) {
-        // final Path withSourcepath = sp.resolve(guessJavaFile);
-        // if (Files.exists(this.sourceFolder.resolve(withSourcepath))) {
-        // this.suggestedJavaFiles.add(withSourcepath);
-        // foundJavaFile = true;
-        // }
-        // }
-        // if (!foundJavaFile) {
-        // this.suggestedUnresolvedJavaFiles.add(guessJavaFile);
-        // final String typename = dd.typename;
-        // final Optional<Path> alreadyFoundJarWithType =
-        // this.suggestedJars.stream().filter(j -> {
-        // return jarContainsType(j, typename);
-        // }).findFirst();
-        // if (!alreadyFoundJarWithType.isPresent()) {
-        // final Optional<Path> foundJarWithType = this.jarsToCopy.stream()
-        // .map(Path::getParent)
-        // .unordered()
-        // .distinct()
-        // .map(this.sourceFolder::resolve)
-        // .flatMap(parent -> {
-        // try {
-        // return Files.find(parent, 1, (file, attr) -> isJar(file));
-        // } catch (final IOException e) {
-        // // TODO Auto-generated catch block
-        // e.printStackTrace();
-        // return Stream.empty();
-        // }
-        // })
-        // .filter(j -> !this.jarNames.contains(j.getFileName()))
-        // .filter(j -> {
-        // return jarContainsType(j, typename);
-        // })
-        // .findFirst();
-        // if (foundJarWithType.isPresent()) {
-        // this.suggestedJars.add(foundJarWithType.get());
-        // }
-        // }
-        // }
-        // }
-        // }
-        // if (unmatchedErrorCount >= 1 /* 5 */) {
-        // // only show the first N errors that could not be mitigated
-        // // TODO show all errors
-        // break;
-        // }
-        // previousSource = source;
-        // }
-        // }
-
-        // if (!this.unresolvedPackages.isEmpty())
-
-        // {
-        // this.out.println("-- unresolved packages --");
-        // for (
-
-        // final String packageName : this.unresolvedPackages.keySet()) {
-        // this.out.println(this.packageName);
-        // }
-        // this.out.println();
-        // }
-
-        // if (!this.unresolvedPackagesForSymbolsBySource.isEmpty()) {
-        // this.out.println("-- unresolved packages for symbols --");
-        // for (final Entry<String, Set<String>> entry :
-        // this.unresolvedPackagesForSymbolsBySource.entrySet()) {
-        // final String symbolName = entry.getKey();
-        // final Set<String> packageSet = entry.getValue();
-        // for (final String packageName : packageSet) {
-        // this.out.println(symbolName + " - " + packageName);
-        // }
-        // }
-        // this.out.println();
-        // }
-
-        // if (!this.suggestedSourcepaths.isEmpty()) {
-        // this.out.println("-- suggested sourcepaths --");
-        // for (final Path suggestedSourcepath : this.suggestedSourcepaths) {
-        // this.out.println(preparePathForListing(this.suggestedSourcepath));
-        // }
-        // this.out.println();
-        // }
-
-        // if (!this.suggestedUnresolvedJavaFiles.isEmpty()) {
-        // this.out.println("-- suggested unresolved java files --");
-        // for (final Path unresolvedJavaFile : this.suggestedUnresolvedJavaFiles) {
-        // this.out.println("TBD/" + preparePathForListing(this.unresolvedJavaFile));
-        // }
-        // this.out.println();
-        // }
-
-        // if (!this.suggestedJavaFiles.isEmpty()) {
-        // this.out.println("-- suggested java files --");
-        // for (final Path javaFile : this.suggestedJavaFiles) {
-        // this.out.println(preparePathForListing(this.javaFile));
-        // }
-        // this.out.println();
-        // }
-
-        // if (!this.suggestedJars.isEmpty()) {
-        // this.out.println("-- suggested jars --");
-        // for (final Path jar : this.suggestedJars) {
-        // this.out.println(preparePathForListing(this.sourceFolder.relativize(this.jar)));
-        // }
-        // this.out.println();
-        // }
-        // for (final CopiedJarFile jar :
-        // this.jarFileHelper.mapByOriginalRelative.values()) {
-        // this.out.show(" ", jar);
-        // this.out.println();
-        // }
     }
 
     protected void loadListings() throws IOException {
@@ -650,10 +597,10 @@ public class MinimizeCodeBase {
     }
 
     protected void identifyJavaFiles() throws IOException {
-        this.javaFileHelper.clear();
+        this.pathHelper.clear();
         for (final Path fileAsPath : this.files) {
             if (CopiedJavaFile.isJavaSource(fileAsPath)) {
-                final CopiedJavaFile fileAsJavaFile = this.javaFileHelper.lookup(fileAsPath);
+                final CopiedJavaFile fileAsJavaFile = this.pathHelper.lookupJavaFile(fileAsPath);
                 this.javaFiles.add(fileAsJavaFile);
             }
         }
@@ -722,9 +669,10 @@ public class MinimizeCodeBase {
                 final Path relativePath = sourcepath.relativize(javaFile.relative);
                 final JavaName packageName = JavaName.fromFolders(relativePath.getParent());
                 this.packageForJavaFile.put(javaFile, packageName);
-                this.sourcepathsForPackage
-                        .computeIfAbsent(packageName, k -> new LinkedHashSet<>())
-                        .add(sourcepath);
+                StaticHelpers.addMapSet(
+                        this.sourcepathsForPackage,
+                        packageName,
+                        sourcepath);
             }
         }
     }
@@ -781,7 +729,7 @@ public class MinimizeCodeBase {
         this.dependencies = new ArrayList<>();
 
         // calculated collections (cleared at start of run)
-        this.javaFileHelper = new CopiedJavaFileHelper(
+        this.pathHelper = new CopiedPathHelper(
                 this.originalFolder,
                 this.destinationSourcesFolder);
         this.javaFiles = new ArrayList<>();
@@ -822,7 +770,7 @@ public class MinimizeCodeBase {
     protected final List<String> dependencies;
 
     protected final List<CopiedJavaFile> javaFiles;
-    protected final CopiedJavaFileHelper javaFileHelper;
+    protected final CopiedPathHelper pathHelper;
 
     protected final List<CopiedJarFile> jarFiles;
     protected final CopiedJarFileHelper jarFileHelper;
@@ -1182,7 +1130,13 @@ public class MinimizeCodeBase {
             for (final Entry<String, Object> entry : item.getShowableProperties().entrySet()) {
                 final Object value = entry.getValue();
                 if (null != value) {
-                    this.show(prefix, entry.getKey(), value);
+                    final String key = entry.getKey();
+                    if (value instanceof Showable) {
+                        this.show(prefix, key, "...");
+                        this.show(prefix + "  ", (Showable) value);
+                    } else {
+                        this.show(prefix, key, value);
+                    }
                 }
             }
         }
@@ -1555,18 +1509,23 @@ public class MinimizeCodeBase {
             return r;
         }
 
-        public JavaName resolve(final JavaName other) {
+        public JavaName qualify(final JavaName other) {
             return new JavaName(this.name, other.name);
         }
 
-        public Path asPath() {
-            return Paths.get(this.name.replace('.', File.pathSeparatorChar));
+        /**
+         * Treat name as package folders in sourcepath
+         */
+        public Path asJavaPackagePath() {
+            return Paths.get(this.name.replace('.', File.separatorChar));
         }
 
-        // public JavaFile asJavaFile() {
-        // return Paths.get(this.name.replace('.', File.pathSeparatorChar) +
-        // JavaFileObject.Kind.SOURCE.extension);
-        // }
+        /**
+         * Treat name as *.java source file
+         */
+        public Path asJavaFilePath() {
+            return Paths.get(this.name.replace('.', File.separatorChar) + CopiedJavaFile.EXTENSION);
+        }
 
         public static JavaName fromFolders(final Path p) {
             if (null == p) {
@@ -1589,16 +1548,24 @@ public class MinimizeCodeBase {
         }
     }
 
-    static class CopiedFile implements Showable {
+    static class CopiedPath implements Showable {
+        final boolean sameRelative;
+        final Path relative;
         final Path originalFolder;
         final Path originalRelative;
         final Path originalResolved;
         final Path destinationFolder;
         final Path destinationRelative;
         final Path destinationResolved;
-        final Path fileName;
 
-        CopiedFile(
+        CopiedPath(
+                final Path relative,
+                final Path originalFolder,
+                final Path destinationFolder) {
+            this(originalFolder, relative, destinationFolder, relative);
+        }
+
+        CopiedPath(
                 final Path originalFolder,
                 final Path originalRelative,
                 final Path destinationFolder,
@@ -1622,18 +1589,29 @@ public class MinimizeCodeBase {
             this.destinationFolder = destinationFolder;
             this.destinationRelative = destinationRelative;
             this.destinationResolved = destinationFolder.resolve(destinationRelative);
-            this.fileName = originalRelative.getFileName();
+
+            this.sameRelative = this.originalRelative.equals(destinationRelative);
+            if (this.sameRelative) {
+                this.relative = this.originalRelative;
+            } else {
+                this.relative = null;
+            }
         }
 
         public LinkedHashMap<String, Object> getShowableProperties() {
             final LinkedHashMap<String, Object> x = new LinkedHashMap<>();
+            final boolean sameRelatives = this.originalRelative.equals(this.destinationRelative);
+            if (sameRelatives) {
+                x.put("relative", this.originalRelative);
+            }
             x.put("originalFolder", this.originalFolder);
-            x.put("originalRelative", this.originalRelative);
             x.put("originalResolved", this.originalResolved);
             x.put("destinationFolder", this.destinationFolder);
-            x.put("destinationRelative", this.destinationRelative);
             x.put("destinationResolved", this.destinationResolved);
-            x.put("fileName", this.fileName);
+            if (!sameRelatives) {
+                x.put("originalRelative", this.originalRelative);
+                x.put("destinationRelative", this.destinationRelative);
+            }
             return x;
         }
 
@@ -1643,10 +1621,6 @@ public class MinimizeCodeBase {
 
         boolean destinationExists() {
             return Files.exists(this.destinationResolved);
-        }
-
-        boolean copied() {
-            return this.originalExists() && this.destinationExists();
         }
 
         @Override
@@ -1659,38 +1633,144 @@ public class MinimizeCodeBase {
         }
     }
 
+    static class CopiedFile extends CopiedPath {
+        final Path fileName;
+
+        CopiedFile(
+                final Path relative,
+                final Path originalFolder,
+                final Path destinationFolder) {
+            this(originalFolder, relative, destinationFolder, relative);
+        }
+
+        CopiedFile(
+                final Path originalFolder,
+                final Path originalRelative,
+                final Path destinationFolder,
+                final Path destinationRelative) {
+            super(originalFolder, originalRelative, destinationFolder, destinationRelative);
+            this.fileName = originalRelative.getFileName();
+        }
+
+        public LinkedHashMap<String, Object> getShowableProperties() {
+            final LinkedHashMap<String, Object> x = super.getShowableProperties();
+            x.put("fileName", this.fileName);
+            return x;
+        }
+
+        @Override
+        boolean originalExists() {
+            return super.originalExists() && Files.isRegularFile(this.originalResolved);
+        }
+
+        @Override
+        boolean destinationExists() {
+            return super.destinationExists() && Files.isRegularFile(this.destinationResolved);
+        }
+
+        boolean copied() {
+            return this.originalExists() && this.destinationExists();
+        }
+    }
+
+    static class CopiedFolder extends CopiedPath {
+        CopiedFolder(
+                final Path relative,
+                final Path originalFolder,
+                final Path destinationFolder) {
+            this(originalFolder, relative, destinationFolder, relative);
+        }
+
+        CopiedFolder(
+                final Path originalFolder,
+                final Path originalRelative,
+                final Path destinationFolder,
+                final Path destinationRelative) {
+            super(originalFolder, originalRelative, destinationFolder, destinationRelative);
+        }
+
+        @Override
+        boolean originalExists() {
+            return super.originalExists() && Files.isDirectory(this.originalResolved);
+        }
+
+        @Override
+        boolean destinationExists() {
+            return super.destinationExists() && Files.isDirectory(this.destinationResolved);
+        }
+    }
+
+    static class CopiedSourcepathFolder extends CopiedFolder {
+        CopiedSourcepathFolder(
+                final Path relative,
+                final Path originalFolder,
+                final Path destinationFolder) {
+            super(relative, originalFolder, destinationFolder);
+        }
+    }
+
+    static class CopiedJavaPackageFolder extends CopiedFolder {
+        final JavaName name;
+        final CopiedSourcepathFolder sourcepath;
+
+        CopiedJavaPackageFolder(
+                final JavaName name,
+                final Path relative,
+                final Path originalFolder,
+                final Path destinationFolder) {
+            super(originalFolder, relative, destinationFolder, relative);
+            final Path packagePath = name.asJavaPackagePath();
+            final Path sourcepathPath = StaticHelpers.pathRemoveEndsWith(relative, packagePath);
+
+            this.name = name;
+            this.sourcepath = new CopiedSourcepathFolder(sourcepathPath, originalFolder, destinationFolder);
+        }
+
+        @Override
+        public LinkedHashMap<String, Object> getShowableProperties() {
+            final LinkedHashMap<String, Object> x = super.getShowableProperties();
+            x.put("name", this.name);
+            x.put("sourcepath", this.sourcepath);
+            return x;
+        }
+    }
+
     static class CopiedJavaFile extends CopiedFile {
         final static String EXTENSION = JavaFileObject.Kind.SOURCE.extension;
         final static int EXTENSION_LENGTH = EXTENSION.length();
 
-        final Path relative;
         final JavaName simpleName;
-        final Optional<JavaName> packageName;
         final Optional<JavaName> qualifiedName;
+        final Optional<CopiedJavaPackageFolder> packageFolder;
 
         CopiedJavaFile(
                 final Path relative,
                 final Path originalFolder,
                 final Path destinationFolder) {
-            super(originalFolder, relative, destinationFolder, relative);
+            super(relative, originalFolder, destinationFolder);
             if (!isJavaSource(relative)) {
                 throw new IllegalArgumentException(String.format(
                         "does not end with \"%s\": %s",
                         EXTENSION,
                         relative));
             }
-            this.relative = relative;
 
             final String fileName = this.originalRelative.getFileName().toString();
             final String typeName = fileName.substring(
                     0,
                     fileName.length() - EXTENSION_LENGTH);
             this.simpleName = new JavaName(typeName);
-            this.packageName = guessPackageName(this.originalResolved);
-            if (this.packageName.isPresent()) {
-                this.qualifiedName = Optional.of(this.packageName.get().resolve(this.simpleName));
+            final Optional<JavaName> packageName = guessPackageName(this.originalResolved);
+            if (packageName.isPresent()) {
+                this.qualifiedName = Optional.of(packageName.get().qualify(this.simpleName));
+                this.packageFolder = Optional.of(new CopiedJavaPackageFolder(
+                        packageName.get(),
+                        this.relative.getParent(),
+                        this.originalFolder,
+                        this.destinationFolder));
             } else {
                 this.qualifiedName = Optional.empty();
+                this.packageFolder = Optional.empty();
             }
         }
 
@@ -1698,7 +1778,7 @@ public class MinimizeCodeBase {
         public LinkedHashMap<String, Object> getShowableProperties() {
             final LinkedHashMap<String, Object> x = super.getShowableProperties();
             x.put("simpleName", this.simpleName);
-            this.packageName.ifPresent(v -> x.put("packageName", v));
+            this.packageFolder.ifPresent(v -> x.put("packageFolder", v));
             this.qualifiedName.ifPresent(v -> x.put("qualifiedName", v));
             return x;
         }
@@ -1725,12 +1805,12 @@ public class MinimizeCodeBase {
         }
     }
 
-    static class CopiedJavaFileHelper {
+    static class CopiedPathHelper {
         final Path originalFolder;
         final Path destinationFolder;
-        final Map<Path, CopiedJavaFile> mapByRelative;
+        final Map<Path, CopiedPath> mapByRelative;
 
-        CopiedJavaFileHelper(final Path originalFolder, final Path destinationFolder) {
+        CopiedPathHelper(final Path originalFolder, final Path destinationFolder) {
             this.originalFolder = originalFolder;
             this.destinationFolder = destinationFolder;
 
@@ -1741,22 +1821,34 @@ public class MinimizeCodeBase {
             this.mapByRelative.clear();
         }
 
-        CopiedJavaFile lookup(final JavaFileObject javaFileObject) {
+        CopiedSourcepathFolder lookupSourcepathFolder(final Path relative) {
+            return (CopiedSourcepathFolder) this.mapByRelative.computeIfAbsent(
+                    relative,
+                    k -> new CopiedSourcepathFolder(
+                            relative,
+                            this.originalFolder,
+                            this.destinationFolder));
+        }
+
+        CopiedJavaFile lookupJavaFile(final Path relative) {
+            return (CopiedJavaFile) this.mapByRelative.computeIfAbsent(
+                    relative,
+                    k -> new CopiedJavaFile(
+                            relative,
+                            this.originalFolder,
+                            this.destinationFolder));
+        }
+
+        CopiedJavaFile lookupJavaFile(final JavaFileObject javaFileObject) {
             final Path javaFileObjectPath = Paths.get(javaFileObject.getName());
             if (!javaFileObjectPath.startsWith(this.destinationFolder)) {
                 throw new UnsupportedOperationException(String.format(
-                        "javaFileObject is not part of this targetFolder%n" +
+                        "javaFileObject is not part of this destination%n" +
                                 "javaFileObject:  %s%n" +
-                                "targetFolder:    %s%n"));
+                                "destination:     %s%n"));
             }
             final Path relative = this.destinationFolder.relativize(javaFileObjectPath);
-            return this.lookup(relative);
-        }
-
-        CopiedJavaFile lookup(final Path relative) {
-            return this.mapByRelative.computeIfAbsent(
-                    relative,
-                    k -> new CopiedJavaFile(relative, this.originalFolder, this.destinationFolder));
+            return this.lookupJavaFile(relative);
         }
     }
 
@@ -2005,6 +2097,20 @@ public class MinimizeCodeBase {
             return "unknown";
         }
 
+        public static Path pathRemoveEndsWith(final Path fullPath, final Path endsWithPath) {
+            if (!fullPath.endsWith(endsWithPath)) {
+                throw new IllegalArgumentException(String.format(
+                        "fullPath does not end with endsWithPath%n"
+                                + "fullPath:      %s%n"
+                                + "endsWithPath:  %s",
+                        fullPath,
+                        endsWithPath));
+            }
+            return fullPath.subpath(
+                    0,
+                    fullPath.getNameCount() - endsWithPath.getNameCount());
+        }
+
         public static Iterable<? extends File> asFileIterable(final Stream<? extends Path> paths) {
             return () -> paths.map(Path::toFile).iterator();
         }
@@ -2038,6 +2144,98 @@ public class MinimizeCodeBase {
 
         public static void addStringsFromListingToList(final Path listing, final List<String> list) throws IOException {
             list.addAll(streamListing(listing).collect(Collectors.toList()));
+        }
+
+        /**
+         * Put a value to a map in a map, creating the mapped map if necessary.
+         * 
+         * @param <K1>  type of outside map keys
+         * @param <K2>  type of inside map keys
+         * @param <V>   type of values
+         * @param map   outside map
+         * @param key1  outside map key
+         * @param key2  inside map key
+         * @param value value to put
+         * @return previous value or null
+         */
+        public static <K1, K2, V> V putMapMap(
+                final Map<K1, Map<K2, V>> map,
+                final K1 key1,
+                final K2 key2,
+                final V value) {
+            return map
+                    .computeIfAbsent(key1, k -> new LinkedHashMap<>())
+                    .put(key2, value);
+        }
+
+        /**
+         * Remove a value from a map in a map, removing the inside map if empty.
+         * 
+         * @param <K1> type of outside map keys
+         * @param <K2> type of inside map keys
+         * @param <V>  type of values
+         * @param map  outside map
+         * @param key1 outside map key
+         * @param key2 inside map key
+         * @return previous value or null
+         */
+        public static <K1, K2, V> V removeAndPruneMapMap(
+                final Map<K1, Map<K2, V>> map,
+                final K1 key1,
+                final K2 key2) {
+            V v = null;
+            final Map<K2, V> map2 = map.get(key1);
+            if (null != map2) {
+                v = map2.remove(key2);
+                if (map2.isEmpty()) {
+                    map.remove(key1);
+                }
+            }
+            return v;
+        }
+
+        /**
+         * Add a value to a set in a map, creating the mapped set if necessary.
+         * 
+         * @param <K>   type of map keys
+         * @param <V>   type of set values
+         * @param map   the map
+         * @param key   the map key
+         * @param value the value to add to the mapped set
+         * @return true if the mapped set did not already contain the specified value
+         */
+        public static <K, V> boolean addMapSet(
+                final Map<K, Set<V>> map,
+                final K key,
+                final V value) {
+            return map
+                    .computeIfAbsent(key, k -> new LinkedHashSet<>())
+                    .add(value);
+        }
+
+        /**
+         * Remove a value from a set in a map, removing the set from the map if empty.
+         * 
+         * @param <K>   type of map keys
+         * @param <V>   type of set values
+         * @param map   the map
+         * @param key   the map key
+         * @param value the value to remove from the mapped set
+         * @return true if the mapped set contained the specified value
+         */
+        public static <K, V> boolean removeAndPruneMapSet(
+                final Map<K, Set<V>> map,
+                final K key,
+                final V value) {
+            boolean r = false;
+            final Set<V> set = map.get(key);
+            if (null != set) {
+                r = set.remove(value);
+                if (set.isEmpty()) {
+                    map.remove(key);
+                }
+            }
+            return r;
         }
 
         public static void mvn(final File directory, final String... args) {
@@ -2107,12 +2305,3 @@ public class MinimizeCodeBase {
         }
     }
 }
-/*
- * TODO vague thoughts about improvement
- * 
- * avoid suggesting java files with insufficient package info
- * 
- * improve suggestions for each java file by checking if it exists in a known
- * sourcepath
- * 
- */
