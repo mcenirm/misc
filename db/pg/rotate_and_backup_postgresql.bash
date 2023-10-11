@@ -4,7 +4,7 @@ set -euo pipefail
 [[ "${TRACE-0}" == "1" ]] && set -x
 
 
-umask 077
+umask 027
 export PGUSER=postgres
 BACKUPS_DIR=/path/to/backups_dir
 KEEP=15
@@ -164,6 +164,11 @@ backup () {
         --format=directory \
         --file="$backup" \
         "$dbname"
+    if [ -d "$backup" ]
+    then
+      # workaround pg_dump ignoring umask for directory (cf postgresql BUG #15502)
+      chmod "$(umask -S)" -- "$backup"
+    fi
   fi
 }
 
