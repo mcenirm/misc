@@ -108,6 +108,13 @@ rotate () {
         -printf '%P\n'
   )
 
+  if [ ${#old_names} -lt 1 ]
+  then
+    # no old names found
+    # TODO Should this be a warning? It happens only with a new dbname
+    return
+  fi
+
   for old_name in "${old_names[@]}"
   do
     old_date=UNSET
