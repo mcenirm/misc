@@ -4,8 +4,13 @@ set -euo pipefail
 [[ "${TRACE-0}" == "1" ]] && set -x
 
 
+if [ 0 -eq "$(id -u)" ]
+then
+  exec sudo -i -u postgres env "TRACE=${TRACE-0}" "$0" "$@"
+fi
+
+
 umask 027
-export PGUSER=postgres
 BACKUPS_DIR=/path/to/backups_dir
 KEEP=15
 declare -a DBNAMES=( _GLOBALS_ )
@@ -148,7 +153,7 @@ rotate () {
   for old_name in "${sorted_old_names[@]}"
   do
     [ $count -ge $KEEP ] || break
-    remove "$old_name"
+    remove_old_backup "$BACKUPS_DIR/$old_name"
     let count--
   done
 }
@@ -209,10 +214,10 @@ is_globals () {
 }
 
 
-remove () {
-  local old_name=$1
+remove_old_backup () {
+  local old_backup=$1
 
-  rm -rf -- "$old_name"
+  rm -rf -- "$old_backup"
 }
   
 
