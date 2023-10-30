@@ -188,7 +188,7 @@ backup () {
 backup_name_for_dbname () {
   local dbname=$1
   local shortname=db.$dbname
-  local suffix='' # blank for directory, .tgz for tar format
+  local suffix='' # blank for directory, .tar for tar format
 
   if is_globals "$dbname"
   then
