@@ -28,14 +28,15 @@ $SourcePathName = 'officedownloads'
 $OfficeSetupName = 'officesetup.exe'
 $ConfigurationXmlName = 'officeconfig.xml'
 $OdtConfirmationCache = "${ODT_FILENAME_PREFIX}confirmation.html"
+$InstallScriptName = 'Install-Office2019.ps1'
 
 
 # Full paths to files
 $SourcePath = Join-Path -Path $PSScriptRoot -ChildPath $SourcePathName
 $OfficeSetupPath = Join-Path -Path $PSScriptRoot -ChildPath $OfficeSetupName
 $ConfigurationXmlPath = Join-Path -Path $PSScriptRoot -ChildPath $ConfigurationXmlName
-$TempConfigPath = Join-Path -Path $PSScriptRoot -ChildPath "temp-$ConfigurationXmlName"
 $OdtConfirmationCachePath = Join-Path -Path $PSScriptRoot -ChildPath $OdtConfirmationCache
+$InstallScriptPath = Join-Path -Path $PSScriptRoot -ChildPath $InstallScriptName
 
 
 function Get-SetupVersion ($SetupPath) {
@@ -84,7 +85,7 @@ function Expand-SetupExe ($SetupExe, $DestinationPath) {
         $errors | Write-Warning
         throw $errors[0]
     }
-    & $cmd e '-aoa' "-o$DestinationPath" $SetupExe
+    & $cmd e '-bb0' '-aoa' "-o$DestinationPath" $SetupExe
 }
 
 
@@ -157,9 +158,14 @@ if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {
 
 
 # Copy existing configuration to temp for download and update SourcePath
+$UseConfigPath = $SourcePath
+$ResolvedSourcePathAsString = (Resolve-Path $SourcePath) -as [string]
 [xml]$Cfg = Get-Content -Path $ConfigurationXmlPath
-$Cfg.Configuration.Add.SourcePath = (Resolve-Path $SourcePath) -as [string]
-$Cfg.Save($TempConfigPath)
+if ($Cfg.Configuration.Add.SourcePath -ne $ResolvedSourcePathAsString) {
+    $Cfg.Configuration.Add.SourcePath = $ResolvedSourcePathAsString
+    $UseConfigPath = New-TemporaryFile
+    $Cfg.Save($UseConfigPath)
+}
 
 
 # Get details about latest version of officedeploymenttool
@@ -223,7 +229,7 @@ Write-Progress 'Prepare' -Completed
 
 # Download Office
 Write-Progress 'Download' -Status "Running Office downloader"
-& $OfficeSetupPath /download $TempConfigPath
+& $OfficeSetupPath /download $UseConfigPath
 if ($false -eq $?) {
     Write-Error "Download failed"
 }
@@ -250,4 +256,34 @@ if (Test-Path -LiteralPath $GoalCabPath) {
     Write-Progress 'Cleaning' -Completed
 }
 
-# TODO show installation command: setup /configure xml
+# Create installation script
+Write-Progress 'Installation script' -Status "Creating installation script"
+Set-Content -LiteralPath $InstallScriptPath -Value (@'
+#Requires -Version 5
+
+$ErrorActionPreference = 'Stop'
+
+'@ + @"
+
+`$SourcePathName = '$SourcePathName'
+`$OfficeSetupName = '$OfficeSetupName'
+`$ConfigurationXmlName = '$ConfigurationXmlName'
+
+"@ + @'
+
+$SourcePath = Join-Path -Path $PSScriptRoot -ChildPath $SourcePathName
+$OfficeSetupPath = Join-Path -Path $PSScriptRoot -ChildPath $OfficeSetupName
+$ConfigurationXmlPath = Join-Path -Path $PSScriptRoot -ChildPath $ConfigurationXmlName
+
+$UseConfigPath = $SourcePath
+$ResolvedSourcePathAsString = (Resolve-Path $SourcePath) -as [string]
+[xml]$Cfg = Get-Content -Path $ConfigurationXmlPath
+if ($Cfg.Configuration.Add.SourcePath -ne $ResolvedSourcePathAsString) {
+    $Cfg.Configuration.Add.SourcePath = $ResolvedSourcePathAsString
+    $UseConfigPath = New-TemporaryFile
+    $Cfg.Save($UseConfigPath)
+}
+
+& $OfficeSetupPath /configure $UseConfigPath
+'@)
+Write-Progress 'Installation script' -Completed
