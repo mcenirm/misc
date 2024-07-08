@@ -13,17 +13,25 @@ fi
 umask 027
 BACKUPS_DIR=/path/to/backups_dir
 KEEP=15
-declare -a DBNAMES=( _GLOBALS_ )
+if [[ $# -gt 0 ]]
+then
+  declare -a DBNAMES=( "$@" )
+  should_lookup_dbnames=false
+else
+  declare -a DBNAMES=( _GLOBALS_ )
+  should_lookup_dbnames=true
+fi
 DATE_FORMAT='%Y-%m-%d'
 DATE_FIND_GLOB='????-??-??'
 DATE_MATCH_PAT='[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'
 DATE=$(date +"$DATE_FORMAT")
 T=$(mktemp)
+# shellcheck disable=SC2064
 trap "rm -f -- '$T'" EXIT
 
 
 main () {
-  lookup_dbnames
+  $should_lookup_dbnames && lookup_dbnames
 
   local should_exit=false
   for dbname in "${DBNAMES[@]}"
@@ -54,7 +62,12 @@ lookup_dbnames () {
 
   while read -r dbname
   do
-    if [ -n "$dbname" -a "$dbname" != template0 ]
+    if [[ $dbname =~ ^psql:[[:space:]]+error:[[:space:]] ]]
+    then
+      printf >&2 '%s\n' "$dbname"
+      return 1
+    fi
+    if [[ -n $dbname && $dbname != template0 ]]
     then
       DBNAMES+=( "$dbname" )
     fi
@@ -63,15 +76,16 @@ lookup_dbnames () {
         --no-password \
         --no-align --tuples-only \
         --command='select datname from pg_database;' \
-        postgres
+        postgres \
+        2>&1
   )
 }
 
 
 check_existing () {
   local dbname=$1
-  local backup_name=$(backup_name_for_dbname "$dbname")
-  local backup=$(backup_for_backup_name "$backup_name")
+  local backup_name ; backup_name=$(backup_name_for_dbname "$dbname")
+  local backup ; backup=$(backup_for_backup_name "$backup_name")
   local label='Database'
 
   if is_globals "$dbname"
@@ -89,8 +103,8 @@ check_existing () {
 
 rotate () {
   local dbname=$1
-  local backup_name=$(backup_name_for_dbname "$dbname")
-  local today_glob=${backup_name/$DATE/$DATE_FIND_GLOB}
+  local backup_name ; backup_name=$(backup_name_for_dbname "$dbname")
+  local today_glob ; today_glob=${backup_name/$DATE/$DATE_FIND_GLOB}
   local -a find_names=( -name "$today_glob" )
   local base=db.${dbname}
 
@@ -105,6 +119,7 @@ rotate () {
       -o -name "$base".pg-'????????'
   )
 
+  local -a old_names
   mapfile -t old_names < <(
     find \
         "$BACKUPS_DIR" \
@@ -113,7 +128,7 @@ rotate () {
         -printf '%P\n'
   )
 
-  if [ ${#old_names} -lt 1 ]
+  if [[ ${#old_names[*]} -lt 1 ]]
   then
     # no old names found
     # TODO Should this be a warning? It happens only with a new dbname
@@ -122,8 +137,8 @@ rotate () {
 
   for old_name in "${old_names[@]}"
   do
-    old_date=UNSET
-    old_category=UNSET
+    local old_date=UNSET
+    local old_category=UNSET
     case "$old_name" in
       *.pg)
         old_date=$(date -r "$BACKUPS_DIR/$old_name" +"$DATE_FORMAT")
@@ -135,34 +150,35 @@ rotate () {
         ;;
       *.${DATE_FIND_GLOB}|*.${DATE_FIND_GLOB}.*)
         [[ "$old_name" =~ $DATE_MATCH_PAT ]]
-        old_date=$(date -d "$BASH_REMATCH" +"$DATE_FORMAT")
+        old_date=$(date -d "${BASH_REMATCH[0]}" +"$DATE_FORMAT")
         old_category=2-backup-with-date
         ;;
       *)
         ErrorExit 'Mismatch find and categorizer:' "$old_name" "$(printf '+ %q\n' "${find_names[@]}")"
         ;;
     esac
-    printf '%s\t%s\t%s\t%s\n' "$old_date" "$old_category" "$old_name"
+    printf '%s\t%s\t%s\n' "$old_date" "$old_category" "$old_name"
   done \
   | sort > "$T"
 
+  local -a sorted_old_names
   mapfile -t sorted_old_names < <(
     cut -f 3 -- "$T"
   )
-  count=${#sorted_old_names[*]}
+  local -i count=${#sorted_old_names[*]}
   for old_name in "${sorted_old_names[@]}"
   do
-    [ $count -ge $KEEP ] || break
+    [[ $count -ge $KEEP ]] || break
     remove_old_backup "$BACKUPS_DIR/$old_name"
-    let count--
+    (( count-- ))
   done
 }
 
 
 backup () {
   local dbname=$1
-  local backup_name=$(backup_name_for_dbname "$dbname")
-  local backup=$(backup_for_backup_name "$backup_name")
+  local backup_name ; backup_name=$(backup_name_for_dbname "$dbname")
+  local backup ; backup=$(backup_for_backup_name "$backup_name")
 
   if is_globals "$dbname"
   then
