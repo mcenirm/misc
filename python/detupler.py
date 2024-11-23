@@ -10,6 +10,6 @@ for sep in (None, "a", "b"):
     for s in ("", "a", "abc", "abcbd", "abc def"):
         v = s.split(sep)
         l = len(v)
-        table.add_row(*[repr(_) for _ in (s, sep, l, v)])
+        table.add_row(*map(repr, (s, sep, l, v)))
 console = Console()
 console.print(table)
