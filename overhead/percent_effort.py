@@ -99,9 +99,35 @@ class DayParser:
 
     @staticmethod
     def _does_day_format_handle_year(__format: str) -> bool:
+        import warnings
+
         today = date.today()
         today_as_string = today.strftime(__format)
-        reparsed_today = DayParser._strpdate(today_as_string, __format)
+
+        # Suppress errors and warnings, since the goal of this test is simply
+        # to determine if parse_day() should try year-guessing.
+        #
+        # If the format is truly unusable, then subsequent calls to parse_day()
+        # will expose the problem.
+        #
+        # > Changed in version 3.13: If format specifies a day of month
+        # > without a year a DeprecationWarning is now emitted. This is to
+        # > avoid a quadrennial leap year bug in code seeking to parse only a
+        # > month and day as the default year used in absence of one in the
+        # > format is not a leap year. Such format values may raise an error
+        # > as of Python 3.15.
+        # >
+        # > - <https://docs.python.org/3.13/library/datetime.html#datetime.datetime.strptime>
+
+        reparsed_today = None
+        with warnings.catch_warnings(action="error"):
+            try:
+                reparsed_today = DayParser._strpdate(today_as_string, __format)
+            except DeprecationWarning:
+                pass
+            except ValueError:
+                pass
+
         return today == reparsed_today
 
 
@@ -320,13 +346,13 @@ class HoursEntry(Entry):
 class DistributionConstraintByAccountNameDict(
     dict[DistributionAccountName, DistributionConstraint]
 ):
-    ...
+    pass
 
 
 class DistributionConstraintsByEntryKeyDict(
     dict[EntryKey, DistributionConstraintByAccountNameDict]
 ):
-    ...
+    pass
 
 
 @dataclass
