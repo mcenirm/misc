@@ -3,7 +3,7 @@
     "files.insertFinalNewline": true,
     "files.trimFinalNewlines": true,
     "java.import.generatesMetadataFilesAtProjectRoot": true,
-    "java.cleanup.actionsOnSave": [
+    "java.cleanup.actions": [
         "addDeprecated",
         "invertEquals",
         "addFinalModifier",
