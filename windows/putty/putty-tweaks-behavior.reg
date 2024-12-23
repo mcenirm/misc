@@ -1,5 +1,8 @@
 Windows Registry Editor Version 5.00
 
+; Note: Patching these values will work ONLY after the
+;       "Default Settings" session is fully saved.
+
 [HKEY_CURRENT_USER\SOFTWARE\SimonTatham\PuTTY\Sessions\Default%20Settings]
 "AgentFwd"=dword:00000001
 "AltSpace"=dword:00000001
