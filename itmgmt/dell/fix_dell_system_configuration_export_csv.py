@@ -18,6 +18,17 @@ import sys
 import _csv
 
 
+# TODO Fix bad quoting, such as: ... 2.5" Chassis ...
+
+# TODO Fix spurious space at 42, 73 (30 char runs?)
+# -----------------------------------------v------------------------------v---
+# 340-CWUJ : PowerEdge R350/R360 Shipping M aterial ...
+# 329-BJTG : PowerEdge R360 Motherboard wit h LOM ...
+# 338-CMQL : Intel Xeon E-2488 3.2G, 8C/16T , 24M Cache, Turbo, HT (95W) D DR5
+# 540-BCRQ : Intel X710-T2L Dual Port 10GbE  BASE-T Adapter, PCIe Low Prof ile
+# -----------------------------------------^------------------------------^---
+
+
 @dataclasses.dataclass
 class FixStats:
     total_rows: int = 0
