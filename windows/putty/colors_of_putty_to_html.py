@@ -1,5 +1,13 @@
+import codecs
 import contextlib
 import dataclasses
+import encodings.utf_7
+import encodings.utf_8
+import encodings.utf_8_sig
+import encodings.utf_16_be
+import encodings.utf_16_le
+import encodings.utf_32_be
+import encodings.utf_32_le
 import pathlib
 import random
 import re
@@ -73,13 +81,7 @@ def parse_reg_file(file_path: pathlib.Path) -> RegistryExport:
     default_value_pattern = re.compile(r"@=\s*(.*)$")
 
     fp = pathlib.Path(file_path)
-    maybe_bom = fp.read_bytes()[:2]
-    if maybe_bom == b"\xff\xfe":
-        encoding = "utf-16le"
-    # elif maybe_bom == ???:
-    else:
-        encoding = "utf-8"
-
+    encoding = guess_encoding_of_existing_file(fp)
     raw_lines = fp.read_text(encoding=encoding).splitlines()
 
     # Try to handle contination lines
@@ -133,6 +135,34 @@ def parse_reg_file(file_path: pathlib.Path) -> RegistryExport:
         raise ValueError("unexpected line", dict(lineno=lineno, line=line))
 
     return registry
+
+
+def guess_encoding_of_existing_file(filename: str | pathlib.Path) -> str | None:
+    filename = pathlib.Path(filename)
+    tests = [
+        (codecs.BOM_UTF8, encodings.utf_8_sig),
+        (codecs.BOM_UTF32_LE, encodings.utf_32_le),
+        (codecs.BOM_UTF16_LE, encodings.utf_16_le),
+        (codecs.BOM_UTF32_BE, encodings.utf_32_be),
+        (codecs.BOM_UTF16_BE, encodings.utf_16_be),
+    ]
+    bom = filename.read_bytes()[: max([len(p) for p, em in tests])]
+    for prefix, enc_mod in tests:
+        if bom.startswith(prefix):
+            break
+    else:
+        enc_mod = None
+    if enc_mod is None:
+        if bom.startswith(b"\x2b\x2f\x76"):
+            if len(bom) > 3:
+                follower = int.from_bytes(bom[3], "big")
+                if 0x38 <= follower <= 0x3F:
+                    enc_mod = encodings.utf_7
+        elif b"\x00" not in bom:
+            enc_mod = encodings.utf_8
+    if enc_mod is None:
+        return None
+    return enc_mod.getregentry().name
 
 
 ############################################################
@@ -306,10 +336,11 @@ def print_contrast_as_html_table() -> None:
     print("</table>")
 
 
-# with contextlib.redirect_stdout(
-#     pathlib.Path("example.html").open("wt", encoding="utf-8")
-# ):
-#     print_contrast_as_html_table()
+if False:
+    with contextlib.redirect_stdout(
+        pathlib.Path("example.html").open("wt", encoding="utf-8")
+    ):
+        print_contrast_as_html_table()
 
 
 ############################################################
@@ -350,7 +381,11 @@ COLOUR_EXPLANATIONS = {
 
 
 for rp in pathlib.Path().glob("*.reg"):
-    reg = parse_reg_file(rp)
+    try:
+        reg = parse_reg_file(rp)
+    except ValueError as e:
+        print("!!", rp, e)
+        continue
     for keypath, key in reg.keys.items():
         if keypath.parent == SESSION_PATH:
             hp = rp.parent / (
