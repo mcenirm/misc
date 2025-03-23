@@ -2,103 +2,136 @@ import pathlib
 import re
 import site
 import sys
+import types
 
 
-# import types
-# for n in dir(site):
-#     if n.startswith("_"):
-#         continue
-#     v = getattr(site, n, None)
-#     if callable(v):
-#         continue
-#     elif isinstance(v, types.ModuleType):
-#         continue
-#     elif isinstance(v, list) and v:
-#         print("..", f"site.{n}")
-#         for i, p in enumerate(v, 1):
-#             print("..", "  ", i, p if p else repr(p))
-#     else:
-#         print("..", f"site.{n}", repr(v))
+def inspect_site():
+    for n in dir(site):
+        if n.startswith("_"):
+            continue
+        v = getattr(site, n, None)
+        if callable(v):
+            continue
+        elif isinstance(v, types.ModuleType):
+            continue
+        elif isinstance(v, list) and v:
+            print("..", f"site.{n}")
+            for i, p in enumerate(v, 1):
+                print("..", "  ", i, p if p else repr(p))
+        else:
+            print("..", f"site.{n}", repr(v))
 
 
-this_script = pathlib.Path(__file__)
-for p in this_script.parents:
-    if (p / ".git").is_dir():
-        desired = p
-        break
-else:
-    # change this if relative path of this_script changes
-    desired = this_script.parent.parent
+def is_git_work_tree(p: pathlib.Path) -> bool:
+    return p.is_dir() and (p / ".git").is_dir()
 
-print("Checking:", desired)
 
-if str(desired) in sys.path:
-    for i, p in enumerate(sys.path, 1):
-        pp = pathlib.Path(p)
-        if pp.is_dir():
-            for j, qq in enumerate(pp.glob("*.pth"), 1):
-                for line in qq.read_text().splitlines():
-                    if line.strip() == str(desired):
-                        print("Found in:", qq)
-    print("Already in sys.path. Nothing to do.")
-else:
-    good_pth_parent = None
+def reset_pth(
+    *,
+    ignore_missing_user_site_parent=False,
+    dry_run=False,
+    print=print,
+    desired_ancestor_test=is_git_work_tree,
+) -> pathlib.Path | None:
+    this_script = pathlib.Path(__file__)
+    for p in this_script.parents:
+        if desired_ancestor_test(p):
+            desired = p
+            break
+    else:
+        # change this if relative path of this_script changes
+        desired = this_script.parent.parent
 
-    # User site is best, even if it doesn't exist yet
-    if site.ENABLE_USER_SITE and site.USER_SITE:
-        usp = pathlib.Path(site.USER_SITE)
-        if usp.parent.is_dir():
-            usp.mkdir(exist_ok=True)
-            good_pth_parent = usp
+    print("Checking:", desired)
 
-    # Otherwise, look for "site-packages"
-    if not good_pth_parent:
+    if str(desired) in sys.path:
+        pth = None
         for i, p in enumerate(sys.path, 1):
-            p = pathlib.Path(p)
-            if p.is_dir() and p.name.lower() == "site-packages":
-                good_pth_parent = p.name
-                break
+            pp = pathlib.Path(p)
+            if pp.is_dir():
+                for j, qq in enumerate(pp.glob("*.pth"), 1):
+                    for line in qq.read_text().splitlines():
+                        if line.strip() == str(desired):
+                            print("Found in:", qq)
+                            pth = pth or qq
+        print("Already in sys.path. Nothing to do.")
+        return pth
+    else:
+        good_pth_parent: pathlib.Path | None = None
 
-    # Otherwise, look for anything that isn't known to be bad
-    if not good_pth_parent:
-        for i, p in enumerate(sys.path, 1):
-            p = pathlib.Path(p)
-            if not p.is_dir():
-                # python3xx.zip
-                continue
-            if p == this_script.parent:
-                # this script's parent is usually first in sys.path
-                # but site doesn't look for .pth files there
-                continue
-            lcname = p.name.lower()
-            if lcname in ("lib", "dlls", "lib-dynload"):
-                # these hold dynamic libraries
-                continue
-            if lcname.startswith("python"):
-                rest = lcname.removeprefix("python")
-                if rest and rest[0].isdigit:
-                    # python3xx
+        # User site is best, even if it doesn't exist yet
+        if site.ENABLE_USER_SITE and site.USER_SITE:
+            usp = pathlib.Path(site.USER_SITE)
+            if usp.parent.is_dir() or ignore_missing_user_site_parent:
+                usp.mkdir(exist_ok=True, parents=True)
+                good_pth_parent = usp
+            else:
+                print("!!", "Missing user site parent:", usp.parent)
+                return None
+
+        # Otherwise, look for "site-packages"
+        if not good_pth_parent:
+            for i, p in enumerate(sys.path, 1):
+                p = pathlib.Path(p)
+                if p.is_dir() and p.name.lower() == "site-packages":
+                    good_pth_parent = p
+                    break
+
+        # Otherwise, look for anything that isn't known to be bad
+        if not good_pth_parent:
+            for i, p in enumerate(sys.path, 1):
+                p = pathlib.Path(p)
+                if not p.is_dir():
+                    # python3xx.zip
                     continue
-            # maybe this is good enough?
-            good_pth_parent = p
+                if p == this_script.parent:
+                    # this script's parent is usually first in sys.path
+                    # but site doesn't look for .pth files there
+                    continue
+                lcname = p.name.lower()
+                if lcname in ("lib", "dlls", "lib-dynload"):
+                    # these hold dynamic libraries
+                    continue
+                if lcname.startswith("python"):
+                    rest = lcname.removeprefix("python")
+                    if rest and rest[0].isdigit:
+                        # python3xx
+                        continue
+                # maybe this is good enough?
+                good_pth_parent = p
 
-    if not good_pth_parent:
-        print("No good .pth parent found")
+        if not good_pth_parent:
+            print("No good .pth parent found")
+            return None
+
+        # Add .pth to good .pth parent
+        if good_pth_parent:
+            name = desired.as_posix().lower()
+            name = re.sub(r"\W+", "_", name)
+            pth = good_pth_parent / f"__editable__.{name}-0.0.0.pth"
+            if pth.exists():
+                # TODO oh no! anyway...
+                pass
+            lines = [
+                f"# Generated by {__file__}",
+                str(desired),
+            ]
+            if dry_run:
+                print("[DRY RUN]", "Would have created:", pth)
+                for line in lines:
+                    print("[DRY RUN]", ">", line)
+            else:
+                pth.write_text("\n".join(lines) + "\n")
+                print("Created:", pth)
+                for line in pth.read_text().splitlines():
+                    print(">", line)
+            return pth
+
+
+def main():
+    if not reset_pth():
         sys.exit(1)
 
-    # Add .pth to good .pth parent
-    if good_pth_parent:
-        name = desired.as_posix().lower()
-        name = re.sub(r"\W+", "_", name)
-        pth = good_pth_parent / f"__editable__.{name}-0.0.0.pth"
-        if pth.exists():
-            # TODO oh no! anyway...
-            pass
-        lines = [
-            f"# Generated by {__file__}",
-            str(desired),
-        ]
-        pth.write_text("\n".join(lines) + "\n")
-        print("Created:", pth)
-        for line in pth.read_text().splitlines():
-            print(">", line)
+
+if __name__ == "__main__":
+    main()
