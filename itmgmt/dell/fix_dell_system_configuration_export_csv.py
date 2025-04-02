@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import csv
 import dataclasses
-import io
 import pathlib
 import sys
 
 import _csv
 
-import frustra.guess_encoding_of_existing_file
+from frustra.csvs import open_file_for_csv_reader, open_file_for_csv_writer
 
 # TODO Fix bad quoting, such as: ... 2.5" Chassis ...
 
@@ -44,17 +43,6 @@ def fix_dell_system_configuration_export_csv(
                 stats.total_rows_fixed += 1
         writeto.writerow(row)
     return stats
-
-
-def open_file_for_csv_reader(csvname: str | pathlib.Path) -> io.TextIOBase:
-    encoding = frustra.guess_encoding_of_existing_file.guess_encoding_of_existing_file(
-        csvname
-    )
-    return open(csvname, "r", encoding=encoding, newline="")
-
-
-def open_file_for_csv_writer(csvname: str | pathlib.Path) -> io.TextIOBase:
-    return open(csvname, "w", encoding="utf-8", newline="")
 
 
 def main():
