@@ -48,13 +48,16 @@ class Specification:
                 line
             )
             if m_heading:
-                if s is None:
-                    s = dict(m_heading.groupdict())
-                    s["linenum"] = linenum
-                else:
+                if t is not None:
+                    raise ValueError(
+                        "Still in table at start of new setting",
+                        dict(linenum=linenum, line=line, oldsetting=s),
+                    )
+                if s is not None:
                     self.settings.append(guess_setting_from_dict(s))
-                    s = None
-                    t = None
+                s = dict(m_heading.groupdict())
+                s["linenum"] = linenum
+                t = None
                 continue
 
             if s is None:
@@ -80,6 +83,11 @@ class Specification:
             if line == "|===":
                 # Table begin vs end
                 if t is None:
+                    if s is None:
+                        raise ValueError(
+                            "Unexpected table outside of setting block",
+                            dict(linenum=linenum),
+                        )
                     t = True
                 else:
                     t = None
