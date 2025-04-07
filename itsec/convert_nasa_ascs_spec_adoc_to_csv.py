@@ -10,7 +10,7 @@ import typing
 if typing.TYPE_CHECKING:
     from _typeshed import SupportsWrite
 
-from frustra.csvs import open_file_for_csv_writer
+from frustra.csvs import open_file_for_csv_writer, save_dataclass_list_as_csv
 from frustra.strings import str_to_identifier
 
 
@@ -207,18 +207,7 @@ class Specification:
 
 
 def spec_to_csv(spec: Specification, csvout: SupportsWrite[str]) -> None:
-    fields_with_values = set()
-    rows = []
-    for setting in spec.settings:
-        d = {k: v for k, v in dataclasses.asdict(setting).items() if v is not None}
-        rows.append(d)
-        fields_with_values.update(d.keys())
-    fieldnames = [
-        f.name for f in dataclasses.fields(Setting) if f.name in fields_with_values
-    ]
-    w = csv.DictWriter(csvout, fieldnames)
-    w.writeheader()
-    w.writerows(rowdicts=rows)
+    save_dataclass_list_as_csv(csvout, spec.settings)
 
 
 def main():
