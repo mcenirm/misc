@@ -16,8 +16,10 @@ from frustra.strings import str_to_identifier
 
 @dataclasses.dataclass
 class Setting:
+    linenum: int | None = None
     nasa_ascs_id: str | None = None
     severity: str | None = None
+    check_type: str | None = None
     path: str | None = None
     nasa_control: str | None = None
     control_setting: str | None = None
@@ -25,9 +27,9 @@ class Setting:
     title: str | None = None
     nist_sp_800_53r5_reference: str | None = None
     stig_reference: str | None = None
-    linenum: int | None = None
-    check_type: str | None = None
     wmi_namespace: str | None = None
+    wmi_class: str | None = None
+    wmi_result: str | None = None
     registry_hive: str | None = None
     registry_key_path: str | None = None
     registry_value_name: str | None = None
@@ -38,6 +40,7 @@ class Setting:
     security_template_value: str | None = None
     audit_category: str | None = None
     audit_subcategory: str | None = None
+    audit_setting: str | None = None
     audit_success: bool | None = None
     audit_failure: bool | None = None
 
@@ -56,7 +59,15 @@ def guess_setting_from_dict(d: dict[str, str]) -> Setting:
 
     if s.type_ == "WMI Query":
         s.check_type = s.type_
+        if context != "HKLM":
+            raise ValueError("Bad WMI context", dict(setting=s, context=context))
         s.wmi_namespace = path
+        s.wmi_class = s.nasa_control
+        s.wmi_result = s.control_setting
+        s.type_ = None
+        s.path = None
+        s.nasa_control = None
+        s.control_setting = None
     elif context in {"HKLM", "HKCU"}:
         s.check_type = "Registry"
         s.registry_hive = context
@@ -78,21 +89,32 @@ def guess_setting_from_dict(d: dict[str, str]) -> Setting:
                 "Bad registry value type",
                 dict(setting=s, registry_value_type=s.registry_value_type),
             )
+        s.path = None
+        s.nasa_control = None
+        s.type_ = None
+        s.control_setting = None
     elif context == "Security Template":
         s.check_type = context
         s.security_template_section = path
         s.security_template_name = s.nasa_control
         s.security_template_value = s.control_setting
+        s.path = None
+        s.nasa_control = None
+        s.control_setting = None
     elif context == "Audit Policy":
         s.check_type = context
         s.audit_category = path
         s.audit_subcategory = s.nasa_control
-        s.audit_success = s.control_setting in {"Success and Failure", "Success"}
-        s.audit_failure = s.control_setting in {"Success and Failure", "Failure"}
-        if s.control_setting not in {"Success and Failure", "Success", "Failure"}:
+        s.audit_setting = s.control_setting
+        s.audit_success = s.audit_setting in {"Success and Failure", "Success"}
+        s.audit_failure = s.audit_setting in {"Success and Failure", "Failure"}
+        if s.audit_setting not in {"Success and Failure", "Success", "Failure"}:
             raise ValueError(
-                "Bad audit setting", dict(setting=s, audit_setting=s.control_setting)
+                "Bad audit setting", dict(setting=s, audit_setting=s.audit_setting)
             )
+        s.path = None
+        s.nasa_control = None
+        s.control_setting = None
     else:
         raise ValueError("Unable to categorize setting", dict(setting=s))
     return s
@@ -185,10 +207,18 @@ class Specification:
 
 
 def spec_to_csv(spec: Specification, csvout: SupportsWrite[str]) -> None:
-    w = csv.DictWriter(csvout, [f.name for f in dataclasses.fields(Setting)])
-    w.writeheader()
+    fields_with_values = set()
+    rows = []
     for setting in spec.settings:
-        w.writerow(dataclasses.asdict(setting))
+        d = {k: v for k, v in dataclasses.asdict(setting).items() if v is not None}
+        rows.append(d)
+        fields_with_values.update(d.keys())
+    fieldnames = [
+        f.name for f in dataclasses.fields(Setting) if f.name in fields_with_values
+    ]
+    w = csv.DictWriter(csvout, fieldnames)
+    w.writeheader()
+    w.writerows(rowdicts=rows)
 
 
 def main():
