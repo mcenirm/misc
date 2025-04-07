@@ -7,7 +7,6 @@ import re
 import sys
 import typing
 
-
 if typing.TYPE_CHECKING:
     from _typeshed import SupportsWrite
 
@@ -17,20 +16,86 @@ from frustra.strings import str_to_identifier
 
 @dataclasses.dataclass
 class Setting:
-    nasa_ascs_id: str = None
-    severity: str = None
-    path: str = None
-    nasa_control: str = None
-    control_setting: str = None
-    type_: str = None
-    title: str = None
-    nist_sp_800_53r5_reference: str = None
-    stig_reference: str = None
-    linenum: int = None
+    nasa_ascs_id: str | None = None
+    severity: str | None = None
+    path: str | None = None
+    nasa_control: str | None = None
+    control_setting: str | None = None
+    type_: str | None = None
+    title: str | None = None
+    nist_sp_800_53r5_reference: str | None = None
+    stig_reference: str | None = None
+    linenum: int | None = None
+    check_type: str | None = None
+    wmi_namespace: str | None = None
+    registry_hive: str | None = None
+    registry_key_path: str | None = None
+    registry_value_name: str | None = None
+    registry_value_type: str | None = None
+    registry_value_data: str | None = None
+    security_template_section: str | None = None
+    security_template_name: str | None = None
+    security_template_value: str | None = None
+    audit_category: str | None = None
+    audit_subcategory: str | None = None
+    audit_success: bool | None = None
+    audit_failure: bool | None = None
 
 
 def guess_setting_from_dict(d: dict[str, str]) -> Setting:
-    return Setting(**d)
+    s = Setting(**d)
+
+    sep = "\\"
+    parts = s.path.split(sep)
+    if len(parts) < 4 or parts[0] != "" or parts[1] != "":
+        raise ValueError(
+            "Bad context in path", dict(setting=s, path=path, pathparts=parts)
+        )
+    context = parts[2]
+    path = sep.join(parts[3:]) if len(parts) > 3 else None
+
+    if s.type_ == "WMI Query":
+        s.check_type = s.type_
+        s.wmi_namespace = path
+    elif context in {"HKLM", "HKCU"}:
+        s.check_type = "Registry"
+        s.registry_hive = context
+        s.registry_key_path = path
+        s.registry_value_name = s.nasa_control
+        s.registry_value_type = s.type_
+        s.registry_value_data = s.control_setting
+        if s.registry_value_type is None:
+            if s.registry_value_name is not None:
+                s.check_type = "Registry value exists"
+            else:
+                s.check_type = "Registry key exists"
+        elif s.registry_value_type not in {
+            "REG_DWORD",
+            "REG_MULTI_SZ",
+            "REG_SZ",
+        }:
+            raise ValueError(
+                "Bad registry value type",
+                dict(setting=s, registry_value_type=s.registry_value_type),
+            )
+    elif context == "Security Template":
+        s.check_type = context
+        s.security_template_section = path
+        s.security_template_name = s.nasa_control
+        s.security_template_value = s.control_setting
+    elif context == "Audit Policy":
+        s.check_type = context
+        s.audit_category = path
+        s.audit_subcategory = s.nasa_control
+        s.audit_success = s.control_setting in {"Success and Failure", "Success"}
+        s.audit_failure = s.control_setting in {"Success and Failure", "Failure"}
+        if s.control_setting not in {"Success and Failure", "Success", "Failure"}:
+            raise ValueError(
+                "Bad audit setting", dict(setting=s, audit_setting=s.control_setting)
+            )
+    else:
+        raise ValueError("Unable to categorize setting", dict(setting=s))
+    return s
 
 
 class Specification:
