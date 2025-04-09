@@ -186,6 +186,9 @@ def guess_setting_from_dict(d: dict[str, str]) -> Setting:
     elif context == "Audit Policy":
         s.check_type = context
         s.audit_category = path
+        if isinstance(s.audit_category, str):
+            # ASCS 'Logon\\Logoff' vs auditpol 'Logon/Logoff'
+            s.audit_category = s.audit_category.replace("\\", "/")
         s.audit_subcategory = s.nasa_control
         s.audit_setting = s.control_setting
         s.audit_success = s.audit_setting in {"Success and Failure", "Success"}
