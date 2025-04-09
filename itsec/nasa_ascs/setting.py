@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import typing
 
 from frustra.strings import str_to_identifier
 
@@ -35,6 +36,9 @@ class Setting:
     audit_setting: str | None = None
     audit_success: bool | None = None
     audit_failure: bool | None = None
+
+    def __lt__(self, other: typing.Self) -> bool:
+        return self.nasa_ascs_id < other.nasa_ascs_id
 
 
 class Specification:

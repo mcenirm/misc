@@ -18,14 +18,16 @@ def dump(*args) -> None:
 
 
 def dump_dataclass_instance(obj, indent=[]) -> bool:
-    try:
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         fs = dataclasses.fields(obj)
         w = max([len(f.name) for f in fs])
         fmt = f"{{n:{w}}}"
+        subindent = indent + ["--"]
         for f in fs:
             a = getattr(obj, f.name)
             print(*indent, fmt.format(n=f.name), elide_repr(a))
-            dump_dataclass_instance(a, indent + ["--"])
+            dump_dataclass_instance(a, indent=subindent)
+        print(*indent)
         return True
-    except TypeError as te:
+    else:
         return False

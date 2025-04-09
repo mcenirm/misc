@@ -3,6 +3,11 @@ from __future__ import annotations
 import enum
 import winreg
 
+HIVES_BY_ABBR = {
+    "HKLM": winreg.HKEY_LOCAL_MACHINE,
+    "HKCU": winreg.HKEY_CURRENT_USER,
+}
+
 
 class RegDataType(enum.IntEnum):
     REG_NONE = winreg.REG_NONE

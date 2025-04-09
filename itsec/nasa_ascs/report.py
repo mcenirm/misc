@@ -23,6 +23,9 @@ class CheckResult:
     expected: typing.Any | None = None
     actual: typing.Any | None = None
 
+    def __lt__(self, other: typing.Self) -> bool:
+        return self.chk < other.chk
+
 
 @dataclasses.dataclass
 class CheckReport:

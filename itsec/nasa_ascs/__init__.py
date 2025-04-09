@@ -3,7 +3,7 @@ from .check import (
     Check,
     PrivilegeRightsCheck,
     RegistryCheck,
-    RegValueExistsCheck,
+    RegistryValueExistsCheck,
     SecurityTemplateCheck,
     ServiceGeneralSettingCheck,
     SystemAccessCheck,
