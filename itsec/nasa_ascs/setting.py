@@ -189,7 +189,10 @@ def guess_setting_from_dict(d: dict[str, str]) -> Setting:
         if isinstance(s.audit_category, str):
             # ASCS 'Logon\\Logoff' vs auditpol 'Logon/Logoff'
             s.audit_category = s.audit_category.replace("\\", "/")
-        s.audit_subcategory = s.nasa_control
+        s.audit_subcategory = {
+            # GPO name -> auditpol name
+            "PNP Activity": "Plug and Play Events",
+        }.get(s.nasa_control, s.nasa_control)
         s.audit_setting = s.control_setting
         s.audit_success = s.audit_setting in {"Success and Failure", "Success"}
         s.audit_failure = s.audit_setting in {"Success and Failure", "Failure"}
