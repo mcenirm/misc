@@ -1,5 +1,6 @@
 import builtins
 import keyword
+import typing
 import unicodedata
 
 
@@ -158,6 +159,17 @@ def guess_words(s: str) -> list[str]:
     return wordlist
 
 
+def _snake_or_CONSTANT_case(
+    s: str,
+    strmethod: typing.Callable[[str], str],
+) -> str | None:
+    words = guess_words(s)
+    words = [strmethod(w) for w in words if w.isalnum()]
+    if not words:
+        return None
+    return "_".join(words)
+
+
 def snake_case(s: str) -> str | None:
     """
 
@@ -185,11 +197,37 @@ def snake_case(s: str) -> str | None:
     'hello_world'
     """
 
-    words = guess_words(s)
-    words = [w.lower() for w in words if w.isalnum()]
-    if not words:
-        return None
-    return "_".join(words)
+    return _snake_or_CONSTANT_case(s, str.lower)
+
+
+def CONSTANT_CASE(s: str) -> str | None:
+    """
+
+    >>> CONSTANT_CASE(None)
+    >>> CONSTANT_CASE("")
+    >>> CONSTANT_CASE("    ")
+    >>> CONSTANT_CASE("!@#$")
+    >>> CONSTANT_CASE("23skidoo")
+    '23SKIDOO'
+    >>> CONSTANT_CASE("hello")
+    'HELLO'
+    >>> CONSTANT_CASE("Hello")
+    'HELLO'
+    >>> CONSTANT_CASE("HELLO")
+    'HELLO'
+    >>> CONSTANT_CASE("hello-world")
+    'HELLO_WORLD'
+    >>> CONSTANT_CASE("HelloWorld")
+    'HELLO_WORLD'
+    >>> CONSTANT_CASE("Hell0World")
+    'HELL0_WORLD'
+    >>> CONSTANT_CASE("Hello World!")
+    'HELLO_WORLD'
+    >>> CONSTANT_CASE("Hello, World!")
+    'HELLO_WORLD'
+    """
+
+    return _snake_or_CONSTANT_case(s, str.upper)
 
 
 def camelCase(s: str) -> str | None:
@@ -270,6 +308,41 @@ def PascalCase(s: str) -> str | None:
     if not words:
         return None
     return "".join(words)
+
+
+def repr_str_with_double_quotes(s: str) -> str:
+    r"""
+
+    >>> s = None ; repr(s) ; repr_str_with_double_quotes(s)
+    'None'
+    'None'
+    >>> s = "None" ; repr(s) ; repr_str_with_double_quotes(s)
+    "'None'"
+    '"None"'
+    >>> s = "" ; repr(s) ; repr_str_with_double_quotes(s)
+    "''"
+    '""'
+    >>> s = "'" ; repr(s) ; repr_str_with_double_quotes(s)
+    '"\'"'
+    '"\'"'
+    >>> s = '"' ; repr(s) ; repr_str_with_double_quotes(s)
+    '\'"\''
+    '"\\""'
+    >>> s = "\"'" ; repr(s) ; repr_str_with_double_quotes(s)
+    '\'"\\\'\''
+    '"\\"\'"'
+    >>> s = "\n" ; repr(s) ; repr_str_with_double_quotes(s)
+    "'\\n'"
+    '"\\n"'
+
+    """
+    if s is None:
+        return repr(None)
+    s = str(s)
+    r = repr(s)
+    if r.startswith('"'):
+        return r
+    return '"' + r[1:-1].replace("\\'", "'").replace('"', '\\"') + '"'
 
 
 def _devmain():
