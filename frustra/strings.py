@@ -1,9 +1,11 @@
 import builtins
+import functools
 import keyword
 import typing
 import unicodedata
 
 
+@functools.cache
 def str_to_identifier(s: str, lowercase=True) -> str:
     if s is None:
         return None
@@ -77,6 +79,7 @@ _EQUIVALENCE_CLASSES = {
 }
 
 
+@functools.cache
 def guess_words(s: str) -> list[str]:
     """
 
@@ -170,6 +173,7 @@ def _snake_or_CONSTANT_case(
     return "_".join(words)
 
 
+@functools.cache
 def snake_case(s: str) -> str | None:
     """
 
@@ -200,6 +204,7 @@ def snake_case(s: str) -> str | None:
     return _snake_or_CONSTANT_case(s, str.lower)
 
 
+@functools.cache
 def CONSTANT_CASE(s: str) -> str | None:
     """
 
@@ -230,6 +235,7 @@ def CONSTANT_CASE(s: str) -> str | None:
     return _snake_or_CONSTANT_case(s, str.upper)
 
 
+@functools.cache
 def camelCase(s: str) -> str | None:
     """
 
@@ -270,6 +276,7 @@ def camelCase(s: str) -> str | None:
     return word
 
 
+@functools.cache
 def PascalCase(s: str) -> str | None:
     """
 
@@ -310,6 +317,7 @@ def PascalCase(s: str) -> str | None:
     return "".join(words)
 
 
+@functools.cache
 def repr_str_with_double_quotes(s: str) -> str:
     r"""
 
