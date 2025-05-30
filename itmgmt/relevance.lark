@@ -1,0 +1,151 @@
+
+?start : expr
+
+
+%extend ?relations_expr : relations_hook (CONTAINS | IS_CONTAINED_BY) relations_expr
+%extend ?relations_expr : relations_hook (ENDS_WITH | STARTS_WITH) relations_expr
+
+// %extend ?casting_operator_hook : of_expr
+
+// ?of_expr : of_hook OF of_expr
+//          | of_hook
+
+// ?of_hook : parentheses_expr
+
+// ?whose_expr : plural_expr WHOSE IT
+//             | plural_expr WHOSE LEFT_PARENTHESIS expr RIGHT_PARENTHESIS
+//             | plural_expr
+
+
+// ?if_then_else_expr : IF expr THEN expr ELSE expr
+
+// %override ?expr : if_then_else_expr
+//                 | expr_hook
+
+
+%override AND.4 : /and/i
+%override OR.2  : /or/i
+
+
+?value : literal
+       | typed_operation
+       | type
+
+!type : WORD+
+
+typed_operation : type parentheses_expr
+
+?literal : STRING
+        | SIGNED_INT
+
+STRING      :   /"([^"%]|%[0-9a-f][0-9a-f])*"/i
+WORD        :   LETTER ( "_" | LETTER | DIGIT )*
+
+
+%import common.DIGIT
+%import common.SIGNED_INT
+%import common.LETTER
+%import common.WS
+%ignore WS
+
+
+%import .relevance_csv.value
+
+
+%import .relevance_csv.parentheses_expr
+%import .relevance_csv.of_expr
+%import .relevance_csv.casting_operator_expr
+%import .relevance_csv.unary_operator_expr
+%import .relevance_csv.products_expr
+%import .relevance_csv.addition_expr
+%import .relevance_csv.relations_expr
+%import .relevance_csv.and_expr
+%import .relevance_csv.or_expr
+%import .relevance_csv.tuple_expr
+%import .relevance_csv.plural_expr
+%import .relevance_csv.expr
+%import .relevance_csv.parentheses_hook
+%import .relevance_csv.of_hook
+%import .relevance_csv.casting_operator_hook
+%import .relevance_csv.unary_operator_hook
+%import .relevance_csv.products_hook
+%import .relevance_csv.addition_hook
+%import .relevance_csv.relations_hook
+%import .relevance_csv.and_hook
+%import .relevance_csv.or_hook
+%import .relevance_csv.tuple_hook
+%import .relevance_csv.plural_hook
+%import .relevance_csv.expr_hook
+%import .relevance_csv.EXIST_NO_TOKENS
+%import .relevance_csv.EXIST_TOKENS
+%import .relevance_csv.GREATER_THAN_TOKENS
+%import .relevance_csv.IS_NOT_GREATER_THAN_TOKENS
+%import .relevance_csv.IS_NOT_LESS_THAN_TOKENS
+%import .relevance_csv.IS_NOT_TOKENS
+%import .relevance_csv.IS_TOKENS
+%import .relevance_csv.LESS_THAN_TOKENS
+%import .relevance_csv.A
+%import .relevance_csv.AN
+%import .relevance_csv.THE
+%import .relevance_csv.AND
+%import .relevance_csv.AS
+%import .relevance_csv.COLLECTION
+%import .relevance_csv.CONTAINS
+%import .relevance_csv.IS_CONTAINED_BY
+%import .relevance_csv.DIVISION
+%import .relevance_csv.DOES_NOT_CONTAIN
+%import .relevance_csv.DOES_NOT_END_WITH
+%import .relevance_csv.DOES_NOT_EQUAL
+%import .relevance_csv.NOT_EQUAL
+%import .relevance_csv.DOES_NOT_START_WITH
+%import .relevance_csv.ELSE
+%import .relevance_csv.ENDS_WITH
+%import .relevance_csv.EQUALS
+%import .relevance_csv.IS_EQUAL_TO
+%import .relevance_csv.EQUALS_SIGN
+%import .relevance_csv.EXIST
+%import .relevance_csv.EXISTS
+%import .relevance_csv.THERE_EXIST
+%import .relevance_csv.THERE_EXISTS
+%import .relevance_csv.EXISTS_NO
+%import .relevance_csv.EXIST_NO
+%import .relevance_csv.THERE_DOES_NOT_EXIST
+%import .relevance_csv.THERE_DO_NOT_EXIST
+%import .relevance_csv.THERE_EXISTS_NO
+%import .relevance_csv.THERE_EXIST_NO
+%import .relevance_csv.GREATER_THAN
+%import .relevance_csv.GREATER_THAN_OR_EQUAL_TO
+%import .relevance_csv.IF
+%import .relevance_csv.IS
+%import .relevance_csv.IS_GREATER_THAN
+%import .relevance_csv.IS_GREATER_THAN_OR_EQUAL_TO
+%import .relevance_csv.IS_LESS_THAN
+%import .relevance_csv.IS_LESS_THAN_OR_EQUAL_TO
+%import .relevance_csv.IS_NOT
+%import .relevance_csv.IS_NOT_CONTAINED_BY
+%import .relevance_csv.IS_NOT_EQUAL_TO
+%import .relevance_csv.IS_NOT_GREATER_THAN
+%import .relevance_csv.IS_NOT_GREATER_THAN_OR_EQUAL_TO
+%import .relevance_csv.IS_NOT_LESS_THAN
+%import .relevance_csv.IS_NOT_LESS_THAN_OR_EQUAL_TO
+%import .relevance_csv.IT
+%import .relevance_csv.ITEM
+%import .relevance_csv.ITEMS
+%import .relevance_csv.LEFT_PARENTHESIS
+%import .relevance_csv.LESS_THAN
+%import .relevance_csv.LESS_THAN_OR_EQUAL_TO
+%import .relevance_csv.MOD
+%import .relevance_csv.MULTIPLICATION
+%import .relevance_csv.NOT
+%import .relevance_csv.NOT_EXISTS
+%import .relevance_csv.NUMBER
+%import .relevance_csv.OF
+%import .relevance_csv.OR
+%import .relevance_csv.RIGHT_PARENTHESIS
+%import .relevance_csv.STARTS_WITH
+%import .relevance_csv.STRING_CONCATENATION
+%import .relevance_csv.SUBTRACTION
+%import .relevance_csv.SUM
+%import .relevance_csv.THEN
+%import .relevance_csv.TUPLE
+%import .relevance_csv.WHOSE
