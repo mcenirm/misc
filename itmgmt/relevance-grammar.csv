@@ -1,6 +1,7 @@
 Worry,Token,Grammatic Value,Original GV,Associativity,Description,Precedence,Effect
 associativity,,(,(,,parentheses,1,
 associativity,,),),,parentheses,1,
+associativity,,of,of,,of,1.5,
 associativity,,as,as,left,casting operator,2,
 associativity,,exists,exists,left,unary operator,3,
 associativity,,not exists,not exists,left,unary operator,3,

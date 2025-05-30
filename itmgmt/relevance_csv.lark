@@ -1,0 +1,384 @@
+
+//
+// Rules
+//
+
+?parentheses_expr      : LEFT_PARENTHESIS  parentheses_hook  RIGHT_PARENTHESIS
+                       | value                                                
+
+?of_expr               : of_hook  OF  of_expr
+                       | of_hook             
+
+?casting_operator_expr : casting_operator_expr  AS  casting_operator_hook
+                       |                            casting_operator_hook
+
+?unary_operator_expr   : EXIST_TOKENS     unary_operator_hook
+                       | EXIST_NO_TOKENS  unary_operator_hook
+                       | NOT              unary_operator_hook
+                       | SUBTRACTION      unary_operator_hook
+                       |                  unary_operator_hook
+
+?products_expr         : products_expr  MULTIPLICATION        products_hook
+                       | products_expr  DIVISION              products_hook
+                       | products_expr  MOD                   products_hook
+                       | products_expr  STRING_CONCATENATION  products_hook
+                       |                                      products_hook
+
+?addition_expr         : addition_expr  SUM          addition_hook
+                       | addition_expr  SUBTRACTION  addition_hook
+                       |                             addition_hook
+
+?relations_expr        : relations_hook  IS_TOKENS                   relations_expr
+                       | relations_hook  IS_NOT_TOKENS               relations_expr
+                       | relations_hook  LESS_THAN_TOKENS            relations_expr
+                       | relations_hook  IS_NOT_GREATER_THAN_TOKENS  relations_expr
+                       | relations_hook  GREATER_THAN_TOKENS         relations_expr
+                       | relations_hook  IS_NOT_LESS_THAN_TOKENS     relations_expr
+                       | relations_hook                                            
+
+?and_expr              : and_expr  AND  and_hook
+                       |                and_hook
+
+?or_expr               : or_expr  OR  or_hook
+                       |              or_hook
+
+?tuple_expr            : tuple_hook  TUPLE  tuple_expr
+                       | tuple_hook                   
+
+?plural_expr           : plural_expr  COLLECTION  plural_hook
+                       |                          plural_hook
+
+?expr                  : expr_hook    
+
+?parentheses_hook      : expr
+?of_hook               : parentheses_expr
+?casting_operator_hook : of_expr
+?unary_operator_hook   : casting_operator_expr
+?products_hook         : unary_operator_expr
+?addition_hook         : products_expr
+?relations_hook        : addition_expr
+?and_hook              : relations_expr
+?or_hook               : and_expr
+?tuple_hook            : or_expr
+?plural_hook           : tuple_expr
+?expr_hook             : plural_expr
+
+//
+// Terminals
+//
+
+EXIST_NO_TOKENS            : THERE_DOES_NOT_EXIST
+                           | THERE_DO_NOT_EXIST
+                           | THERE_EXISTS_NO
+                           | THERE_EXIST_NO
+                           | NOT_EXISTS
+                           | EXISTS_NO
+                           | EXIST_NO
+
+EXIST_TOKENS               : THERE_EXISTS
+                           | THERE_EXIST
+                           | EXISTS
+                           | EXIST
+
+GREATER_THAN_TOKENS        : IS_NOT_LESS_THAN_OR_EQUAL_TO
+                           | IS_GREATER_THAN
+                           | GREATER_THAN
+
+IS_NOT_GREATER_THAN_TOKENS : IS_LESS_THAN_OR_EQUAL_TO
+                           | IS_NOT_GREATER_THAN
+                           | LESS_THAN_OR_EQUAL_TO
+
+IS_NOT_LESS_THAN_TOKENS    : IS_GREATER_THAN_OR_EQUAL_TO
+                           | IS_NOT_LESS_THAN
+                           | GREATER_THAN_OR_EQUAL_TO
+
+IS_NOT_TOKENS              : IS_NOT_EQUAL_TO
+                           | DOES_NOT_EQUAL
+                           | IS_NOT
+                           | NOT_EQUAL
+
+IS_TOKENS                  : IS_EQUAL_TO
+                           | EQUALS
+                           | IS
+                           | EQUALS_SIGN
+
+LESS_THAN_TOKENS           : IS_NOT_GREATER_THAN_OR_EQUAL_TO
+                           | IS_LESS_THAN
+                           | LESS_THAN
+
+// Ignored by the relevance evaluator.
+// Used to improve readability.
+A.2                               : /a/
+AN.3                              : /an/
+THE.2                             : /the/
+
+// The logical AND operator.
+// Doesn’t evaluate the right hand side if the left hand side is false.
+AND.4                             : /and/
+
+// The typecast operator, used to convert one type to another.
+AS.3                              : /as/
+
+// The collection operator.
+// Collects its operands into one plural result.
+COLLECTION.2                      : /;/
+
+// Returns TRUE when a string contains another string as a substring.
+CONTAINS.2                        : /contains/
+IS_CONTAINED_BY.3                 : /is\s+contained\s+by/
+
+// The division operator.
+DIVISION.2                        : /\//
+
+// Equivalent to ‘not contains’.
+DOES_NOT_CONTAIN.2                : /does\s+not\s+contain/
+
+// Returns TRUE when a string does not end with the specified substring.
+DOES_NOT_END_WITH.2               : /does\s+not\s+end\s+with/
+
+// Equivalent to ‘is not’.
+DOES_NOT_EQUAL.2                  : /does\s+not\s+equal/
+NOT_EQUAL.2                       : /!=/
+
+// Returns TRUE when a string does not start with the specified substring.
+DOES_NOT_START_WITH.2             : /does\s+not\s+start\s+with/
+
+// Denotes the alternative path in an ‘if-then-else’ statement.
+ELSE.2                            : /else/
+
+// Returns TRUE when a string ends with the specified substring.
+ENDS_WITH.2                       : /ends\s+with/
+
+// Equivalent to ‘is’.
+EQUALS.2                          : /equals/
+IS_EQUAL_TO.3                     : /is\s+equal\s+to/
+
+// Equivalent to the ‘is’ keyword.
+EQUALS_SIGN.2                     : /=/
+
+// Returns a boolean TRUE / FALSE indicating whether an object exists.
+EXIST.2                           : /exist/
+
+// Equivalent to ‘exist’.
+EXISTS.3                          : /exists/
+THERE_EXIST.3                     : /there\s+exist/
+THERE_EXISTS.4                    : /there\s+exists/
+
+// Equivalent to ‘not exist’.
+EXISTS_NO.4                       : /exists\s+no/
+EXIST_NO.3                        : /exist\s+no/
+THERE_DOES_NOT_EXIST.3            : /there\s+does\s+not\s+exist/
+THERE_DO_NOT_EXIST.3              : /there\s+do\s+not\s+exist/
+THERE_EXISTS_NO.5                 : /there\s+exists\s+no/
+THERE_EXIST_NO.4                  : /there\s+exist\s+no/
+
+// The ‘greater than’ operator.
+GREATER_THAN.2                    : />/
+
+// The ‘greater than or equal to’ operator.
+GREATER_THAN_OR_EQUAL_TO.3        : />=/
+
+// The keyword to begin an ‘if-then-else’ expression.
+IF.2                              : /if/
+
+// Returns TRUE when two objects are equal.
+// Note that not all objects can be tested for equality.
+// Equivalent to the ‘=’ operator.
+IS.2                              : /is/
+
+// The ‘>’ comparison.
+IS_GREATER_THAN.3                 : /is\s+greater\s+than/
+
+// The ‘>=’ comparison.
+IS_GREATER_THAN_OR_EQUAL_TO.4     : /is\s+greater\s+than\s+or\s+equal\s+to/
+
+// The ‘<’ comparison.
+IS_LESS_THAN.3                    : /is\s+less\s+than/
+
+// The ‘<=’ comparison.
+IS_LESS_THAN_OR_EQUAL_TO.4        : /is\s+less\s+than\s+or\s+equal\s+to/
+
+// Returns TRUE when two objects are not equal.
+// Note that not all objects can be compared with this keyword.
+IS_NOT.3                          : /is\s+not/
+
+// Returns TRUE when a string does not contain another string as a substring.
+IS_NOT_CONTAINED_BY.4             : /is\s+not\s+contained\s+by/
+
+// Equivalent to the keyword ‘is not’ and the ‘!=’ operator.
+IS_NOT_EQUAL_TO.4                 : /is\s+not\s+equal\s+to/
+
+// Equivalent to is less than or equal to or ‘<=’.
+IS_NOT_GREATER_THAN.4             : /is\s+not\s+greater\s+than/
+
+// Equivalent to is less than or ‘<’.
+IS_NOT_GREATER_THAN_OR_EQUAL_TO.5 : /is\s+not\s+greater\s+than\s+or\s+equal\s+to/
+
+// Equivalent to is greater than or equal to or ‘>=’.
+IS_NOT_LESS_THAN.4                : /is\s+not\s+less\s+than/
+
+// Equivalent to is greater than or ‘>’.
+IS_NOT_LESS_THAN_OR_EQUAL_TO.5    : /is\s+not\s+less\s+than\s+or\s+equal\s+to/
+
+// A reference to the closest direct object or ‘whose’ clause.
+IT.2                              : /it/
+
+// Used to index into a tuple.
+// Always returns a singular value.
+ITEM.3                            : /item/
+
+// Equivalent to item, but returns a plural value.
+ITEMS.4                           : /items/
+
+LEFT_PARENTHESIS.2                : /\(/
+
+// The ‘less than’ operator.
+LESS_THAN.2                       : /</
+
+// The ‘less than or equal to’ operator.
+LESS_THAN_OR_EQUAL_TO.3           : /<=/
+
+// The modulo operator.
+MOD.2                             : /mod/
+
+// The multiplication operator.
+MULTIPLICATION.2                  : /\*/
+
+// The logical NOT operator.
+NOT.2                             : /not/
+
+NOT_EXISTS.3                      : /not\s+exists/
+
+// Returns the number of results in an expression.
+NUMBER.2                          : /number/
+
+// Used to access a property of an object.
+OF.2                              : /of/
+
+// The logical OR operator.
+// Doesn’t evaluate the right hand side if the left hand side is true.
+OR.2                              : /or/
+
+RIGHT_PARENTHESIS.2               : /\)/
+
+// Returns TRUE when a string begins with the specified substring.
+STARTS_WITH.2                     : /starts\s+with/
+
+// The string concatenation operator.
+STRING_CONCATENATION.2            : /\&/
+
+// The subtraction operator.
+SUBTRACTION.2                     : /\-/
+
+// The sum operator.
+SUM.2                             : /\+/
+
+// Denotes the main path to take in an if-then-else expression.
+THEN.3                            : /then/
+
+// The tuple operator.
+// Creates a tuple of objects.
+TUPLE.2                           : /,/
+
+// Used along with the ‘it’ keyword to filter plural results.
+WHOSE.2                           : /whose/
+
+
+// %import .relevance_csv.parentheses_expr
+// %import .relevance_csv.of_expr
+// %import .relevance_csv.casting_operator_expr
+// %import .relevance_csv.unary_operator_expr
+// %import .relevance_csv.products_expr
+// %import .relevance_csv.addition_expr
+// %import .relevance_csv.relations_expr
+// %import .relevance_csv.and_expr
+// %import .relevance_csv.or_expr
+// %import .relevance_csv.tuple_expr
+// %import .relevance_csv.plural_expr
+// %import .relevance_csv.expr
+// %import .relevance_csv.parentheses_hook
+// %import .relevance_csv.of_hook
+// %import .relevance_csv.casting_operator_hook
+// %import .relevance_csv.unary_operator_hook
+// %import .relevance_csv.products_hook
+// %import .relevance_csv.addition_hook
+// %import .relevance_csv.relations_hook
+// %import .relevance_csv.and_hook
+// %import .relevance_csv.or_hook
+// %import .relevance_csv.tuple_hook
+// %import .relevance_csv.plural_hook
+// %import .relevance_csv.expr_hook
+// %import .relevance_csv.EXIST_NO_TOKENS
+// %import .relevance_csv.EXIST_TOKENS
+// %import .relevance_csv.GREATER_THAN_TOKENS
+// %import .relevance_csv.IS_NOT_GREATER_THAN_TOKENS
+// %import .relevance_csv.IS_NOT_LESS_THAN_TOKENS
+// %import .relevance_csv.IS_NOT_TOKENS
+// %import .relevance_csv.IS_TOKENS
+// %import .relevance_csv.LESS_THAN_TOKENS
+// %import .relevance_csv.A
+// %import .relevance_csv.AN
+// %import .relevance_csv.THE
+// %import .relevance_csv.AND
+// %import .relevance_csv.AS
+// %import .relevance_csv.COLLECTION
+// %import .relevance_csv.CONTAINS
+// %import .relevance_csv.IS_CONTAINED_BY
+// %import .relevance_csv.DIVISION
+// %import .relevance_csv.DOES_NOT_CONTAIN
+// %import .relevance_csv.DOES_NOT_END_WITH
+// %import .relevance_csv.DOES_NOT_EQUAL
+// %import .relevance_csv.NOT_EQUAL
+// %import .relevance_csv.DOES_NOT_START_WITH
+// %import .relevance_csv.ELSE
+// %import .relevance_csv.ENDS_WITH
+// %import .relevance_csv.EQUALS
+// %import .relevance_csv.IS_EQUAL_TO
+// %import .relevance_csv.EQUALS_SIGN
+// %import .relevance_csv.EXIST
+// %import .relevance_csv.EXISTS
+// %import .relevance_csv.THERE_EXIST
+// %import .relevance_csv.THERE_EXISTS
+// %import .relevance_csv.EXISTS_NO
+// %import .relevance_csv.EXIST_NO
+// %import .relevance_csv.THERE_DOES_NOT_EXIST
+// %import .relevance_csv.THERE_DO_NOT_EXIST
+// %import .relevance_csv.THERE_EXISTS_NO
+// %import .relevance_csv.THERE_EXIST_NO
+// %import .relevance_csv.GREATER_THAN
+// %import .relevance_csv.GREATER_THAN_OR_EQUAL_TO
+// %import .relevance_csv.IF
+// %import .relevance_csv.IS
+// %import .relevance_csv.IS_GREATER_THAN
+// %import .relevance_csv.IS_GREATER_THAN_OR_EQUAL_TO
+// %import .relevance_csv.IS_LESS_THAN
+// %import .relevance_csv.IS_LESS_THAN_OR_EQUAL_TO
+// %import .relevance_csv.IS_NOT
+// %import .relevance_csv.IS_NOT_CONTAINED_BY
+// %import .relevance_csv.IS_NOT_EQUAL_TO
+// %import .relevance_csv.IS_NOT_GREATER_THAN
+// %import .relevance_csv.IS_NOT_GREATER_THAN_OR_EQUAL_TO
+// %import .relevance_csv.IS_NOT_LESS_THAN
+// %import .relevance_csv.IS_NOT_LESS_THAN_OR_EQUAL_TO
+// %import .relevance_csv.IT
+// %import .relevance_csv.ITEM
+// %import .relevance_csv.ITEMS
+// %import .relevance_csv.LEFT_PARENTHESIS
+// %import .relevance_csv.LESS_THAN
+// %import .relevance_csv.LESS_THAN_OR_EQUAL_TO
+// %import .relevance_csv.MOD
+// %import .relevance_csv.MULTIPLICATION
+// %import .relevance_csv.NOT
+// %import .relevance_csv.NOT_EXISTS
+// %import .relevance_csv.NUMBER
+// %import .relevance_csv.OF
+// %import .relevance_csv.OR
+// %import .relevance_csv.RIGHT_PARENTHESIS
+// %import .relevance_csv.STARTS_WITH
+// %import .relevance_csv.STRING_CONCATENATION
+// %import .relevance_csv.SUBTRACTION
+// %import .relevance_csv.SUM
+// %import .relevance_csv.THEN
+// %import .relevance_csv.TUPLE
+// %import .relevance_csv.WHOSE
+
