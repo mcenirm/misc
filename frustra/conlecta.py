@@ -30,3 +30,27 @@ class defaultdict_where_default_value_is_missing_key(
 ):
     def __init__(self, *args, **kwargs):
         super().__init__(lambda k: k, *args, **kwargs)
+
+
+class MapAndGroupByResultException(BaseException):
+    """Partial results captured in e.results"""
+
+    def __init__(self, *args, results={}):
+        super().__init__(*args)
+        self.results = dict(results)
+
+
+def map_and_group_by_result[_IT, _RT](
+    fn: typing.Callable[[_IT], _RT],
+    iterable: typing.Iterable[_IT],
+) -> dict[_RT, list[_IT]]:
+    results: dict[_RT, list[_IT]] = {}
+    for item in iterable:
+        try:
+            res = fn(item)
+            if res not in results:
+                results[res] = []
+            results[res].append(item)
+        except Exception as e:
+            raise MapAndGroupByResultException(results=results) from e
+    return results
