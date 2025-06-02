@@ -74,6 +74,8 @@ class FindJavaMains {
                                     }
                                 }
                                 if (hasUsableMain) {
+                                    System.out.print(start);
+                                    System.out.print(File.separator);
                                     System.out.print(relativePathAsString);
                                     System.out.print(": ");
                                     System.out.print(qualifiedName);
