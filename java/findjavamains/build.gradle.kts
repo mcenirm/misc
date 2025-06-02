@@ -1,5 +1,6 @@
 plugins {
     application
+    id("com.gradleup.shadow") version "8.3.6"
 }
 
 repositories {
@@ -18,13 +19,4 @@ java {
 
 application {
     mainClass.set("FindJavaMains")
-}
-
-tasks.register<Jar>("uberJar") {
-    archiveClassifier.set("uber")
-    from(sourceSets.main.get().output)
-    dependsOn(configurations.runtimeClasspath)
-    from({
-        configurations.runtimeClasspath.get().filter { it.name.endsWith("jar") }.map { zipTree(it) }
-    })
 }
