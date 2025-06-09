@@ -1,3 +1,4 @@
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -51,7 +52,7 @@ class FindJavaMains {
             argi++;
         }
         if (starts.size() < 1) {
-            starts.add(Paths.get(""));
+            starts.add(Paths.get("."));
         }
 
         Log.setAdapter(new Log.StandardOutStandardErrorAdapter());
@@ -77,7 +78,7 @@ class FindJavaMains {
                                     System.out.print(start);
                                     System.out.print(File.separator);
                                     System.out.print(relativePathAsString);
-                                    System.out.print(": ");
+                                    System.out.print("\t");
                                     System.out.print(qualifiedName);
                                     System.out.println();
                                 }
