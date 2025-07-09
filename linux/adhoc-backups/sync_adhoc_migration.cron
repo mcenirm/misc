@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# vim: shiftwidth=2 tabstop=2 expandtab
+set -euo pipefail
+[[ "${TRACE-0}" == "1" ]] && set -x
+
+#
+# Warning
+#
+# This script was used in a specific situation, and is probably
+# not useful as a general utility or template.
+#
+# ( Sync lots of science data from old server to new server,  )
+# ( while progressively migrating individual processing flows )
+# ( without breaking anything on old server or on new server, )
+# ( except for the individual switchovers.                    )
+#
+
+remotehostshort='aaaaa'
+remotehostfull=$remotehostshort'.bbbbbdomain'
+remotepath='/ccccc/ddddd'
+
+localpath='/eeeee/fffff'
+
+src=$remotehostfull':'$remotepath'/'
+dest=$localpath'/.sync-from-'$remotehostshort
+
+rsync_args=(
+    --max-delete=300
+    --delete-delay
+    --recursive
+    --links
+    --perms
+    --times
+    --group
+    --owner
+    --numeric-ids
+    --devices
+    --specials
+    --hard-links
+    --acls
+)
+
+if (( $# > 0 ))
+then
+  rsync_args+=( "$@" )
+fi
+
+rsync "${rsync_args[@]}" -- "$src" "$dest"
