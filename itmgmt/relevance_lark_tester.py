@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import inspect
 import pathlib
+import sys
 import typing
 
 import lark
@@ -11,19 +12,15 @@ import lark
 def relevance_lark_tester(
     grammarfilename: str | pathlib.Path,
     testfilename: str | pathlib.Path,
+    parser: str,
+    lexer: str,
     print=print,
+    interactive=False,
 ):
+    parser = "earley" if parser is None else str(parser)
+    lexer = "auto" if lexer is None else str(lexer)
     grammarfilename = pathlib.Path(grammarfilename)
     testfilename = pathlib.Path(testfilename)
-
-    # parser, lexer = "earley", "auto"
-    # parser, lexer = "earley", "basic"
-    # parser, lexer = "earley", "dynamic"
-    # parser, lexer = "earley", "dynamic_complete"
-    # parser, lexer = "lalr", "auto"
-    # parser, lexer = "lalr", "basic"
-    parser, lexer = "lalr", "contextual"
-    # parser, lexer = "cyk", "auto"
 
     relevance = lark.Lark(
         grammar=grammarfilename.read_text(encoding="utf-8"), parser=parser, lexer=lexer
@@ -35,17 +32,28 @@ def relevance_lark_tester(
             continue
         print(expr)
         try:
-            tree = relevance.parse(expr)
-            showtree(tree, print=print)
-            showspans(tree, print=print)
-            # print(re.sub(r"\b(Tree|Token)\(", "(", str(tree)))
+            if interactive and parser == "lalr":
+                ip = relevance.parse_interactive(expr)
+                for i, token in enumerate(ip.iter_parse(), 1):
+                    depthfirstshowspan(token, print=print)
+                if ip.result:
+                    print(ip.result)
+            else:
+                tree = relevance.parse(expr)
+                showtree(tree, print=print)
+                showspans(tree, print=print)
+                # print(re.sub(r"\b(Tree|Token)\(", "(", str(tree)))
             print()
         except lark.exceptions.UnexpectedInput as unexpected:
-            # dump_object(vars(unexpected))
             print()
-            print(str(unexpected).splitlines()[0])
-            print(unexpected.get_context(expr))
-            raise SystemExit()
+            # print(str(unexpected).splitlines()[0])
+            # print(unexpected.get_context(expr))
+            print(unexpected)
+            raise
+        except lark.exceptions.ParseError as parse_error:
+            print()
+            print(parse_error)
+            raise
 
 
 def showtree(tree: lark.ParseTree, print=print):
@@ -149,13 +157,35 @@ def print_table(table: list[list[str]], *args: typing.Any, print=print):
 
 
 def main():
-    relevance_lark_tester(
-        grammarfilename=pathlib.Path("relevance.lark"),
-        testfilename=pathlib.Path("relevance-snippets.txt"),
-        print=functools.partial(
-            print, file=pathlib.Path("tester.out").open("w", encoding="utf-8")
-        ),
-    )
+    interactive = "-i" in sys.argv[1:]
+    grammarfilename = pathlib.Path("relevance.lark")
+    testfilename = pathlib.Path("relevance-snippets.txt")
+    outfilename = "tester"
+    outfileext = ".out"
+    for parser, lexer in [
+        ("earley", "auto"),
+        ("earley", "basic"),
+        ("earley", "dynamic"),
+        ("earley", "dynamic_complete"),
+        ("lalr", "auto"),
+        ("lalr", "basic"),
+        ("lalr", "contextual"),
+        ("cyk", "auto"),
+    ]:
+        outpath = pathlib.Path("-".join((outfilename, parser, lexer)) + outfileext)
+        outprint = functools.partial(print, file=outpath.open("w", encoding="utf-8"))
+        print(outpath)
+        try:
+            relevance_lark_tester(
+                grammarfilename=grammarfilename,
+                testfilename=testfilename,
+                parser=parser,
+                lexer=lexer,
+                print=outprint,
+                interactive=interactive,
+            )
+        except (lark.exceptions.UnexpectedInput, lark.exceptions.ParseError) as e:
+            print(str(e).splitlines()[0])
 
 
 if __name__ == "__main__":
