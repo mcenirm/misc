@@ -42,6 +42,8 @@ def relevance_munge_grammar_csv_to_lark(
         writer.write_grammar()
 
 
+WORRIES_TO_IGNORE = {"pseudokeyword"}
+
 RG_WORRY = "worry"
 RG_TOKEN = "token"
 RG_GRAMMATIC_VALUE = "grammatic_value"
@@ -562,6 +564,8 @@ def read_relevance_grammar_csv(csvfilename: str | pathlib.Path) -> list[RowType]
                 for k, v in row.items()
                 if v not in {None, ""}
             }
+            if RG_WORRY in row and row[RG_WORRY] in WORRIES_TO_IGNORE:
+                continue
             if RG_TOKEN not in row and RG_ORIGINAL_GV in row:
                 row[RG_TOKEN] = row.pop(RG_ORIGINAL_GV)
             rows.append(row)

@@ -85,3 +85,9 @@ keyword,there exist no,not exists,,,,,Equivalent to ‘not exist’.
 keyword,there exists,exists,,,,,Equivalent to ‘exist’.
 keyword,there exists no,not exists,,,,,Equivalent to ‘not exist’.
 keyword,whose,whose,,,,,Used along with the ‘it’ keyword to filter plural results.
+pseudokeyword,false,false,,,,,
+pseudokeyword,nil,nil,,,,,
+pseudokeyword,nothing,nothing,,,,,
+pseudokeyword,nothings,nothing,,,,,
+pseudokeyword,null,nil,,,,,
+pseudokeyword,true,true,,,,,
