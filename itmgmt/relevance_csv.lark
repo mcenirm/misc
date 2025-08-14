@@ -108,69 +108,69 @@ LESS_THAN_TOKENS           : IS_NOT_GREATER_THAN_OR_EQUAL_TO
 
 // Ignored by the relevance evaluator.
 // Used to improve readability.
-A.2                               : /a/
-AN.3                              : /an/
-THE.2                             : /the/
+A.2                               : /a\b/i
+AN.3                              : /an\b/i
+THE.2                             : /the\b/i
 
 // The logical AND operator.
 // Doesn’t evaluate the right hand side if the left hand side is false.
-AND.4                             : /and/
+AND.4                             : /and\b/i
 
 // The typecast operator, used to convert one type to another.
-AS.3                              : /as/
+AS.3                              : /as\b/i
 
 // The collection operator.
 // Collects its operands into one plural result.
 COLLECTION.2                      : /;/
 
 // Returns TRUE when a string contains another string as a substring.
-CONTAINS.2                        : /contains/
-IS_CONTAINED_BY.3                 : /is\s+contained\s+by/
+CONTAINS.2                        : /contains\b/i
+IS_CONTAINED_BY.3                 : /is\s+contained\s+by\b/i
 
 // The division operator.
 DIVISION.2                        : /\//
 
 // Equivalent to ‘not contains’.
-DOES_NOT_CONTAIN.2                : /does\s+not\s+contain/
+DOES_NOT_CONTAIN.2                : /does\s+not\s+contain\b/i
 
 // Returns TRUE when a string does not end with the specified substring.
-DOES_NOT_END_WITH.2               : /does\s+not\s+end\s+with/
+DOES_NOT_END_WITH.2               : /does\s+not\s+end\s+with\b/i
 
 // Equivalent to ‘is not’.
-DOES_NOT_EQUAL.2                  : /does\s+not\s+equal/
+DOES_NOT_EQUAL.2                  : /does\s+not\s+equal\b/i
 NOT_EQUAL.2                       : /!=/
 
 // Returns TRUE when a string does not start with the specified substring.
-DOES_NOT_START_WITH.2             : /does\s+not\s+start\s+with/
+DOES_NOT_START_WITH.2             : /does\s+not\s+start\s+with\b/i
 
 // Denotes the alternative path in an ‘if-then-else’ statement.
-ELSE.2                            : /else/
+ELSE.2                            : /else\b/i
 
 // Returns TRUE when a string ends with the specified substring.
-ENDS_WITH.2                       : /ends\s+with/
+ENDS_WITH.2                       : /ends\s+with\b/i
 
 // Equivalent to ‘is’.
-EQUALS.2                          : /equals/
-IS_EQUAL_TO.3                     : /is\s+equal\s+to/
+EQUALS.2                          : /equals\b/i
+IS_EQUAL_TO.3                     : /is\s+equal\s+to\b/i
 
 // Equivalent to the ‘is’ keyword.
 EQUALS_SIGN.2                     : /=/
 
 // Returns a boolean TRUE / FALSE indicating whether an object exists.
-EXIST.2                           : /exist/
+EXIST.2                           : /exist\b/i
 
 // Equivalent to ‘exist’.
-EXISTS.3                          : /exists/
-THERE_EXIST.3                     : /there\s+exist/
-THERE_EXISTS.4                    : /there\s+exists/
+EXISTS.3                          : /exists\b/i
+THERE_EXIST.3                     : /there\s+exist\b/i
+THERE_EXISTS.4                    : /there\s+exists\b/i
 
 // Equivalent to ‘not exist’.
-EXISTS_NO.4                       : /exists\s+no/
-EXIST_NO.3                        : /exist\s+no/
-THERE_DOES_NOT_EXIST.3            : /there\s+does\s+not\s+exist/
-THERE_DO_NOT_EXIST.3              : /there\s+do\s+not\s+exist/
-THERE_EXISTS_NO.5                 : /there\s+exists\s+no/
-THERE_EXIST_NO.4                  : /there\s+exist\s+no/
+EXISTS_NO.4                       : /exists\s+no\b/i
+EXIST_NO.3                        : /exist\s+no\b/i
+THERE_DOES_NOT_EXIST.3            : /there\s+does\s+not\s+exist\b/i
+THERE_DO_NOT_EXIST.3              : /there\s+do\s+not\s+exist\b/i
+THERE_EXISTS_NO.5                 : /there\s+exists\s+no\b/i
+THERE_EXIST_NO.4                  : /there\s+exist\s+no\b/i
 
 // The ‘greater than’ operator.
 GREATER_THAN.2                    : />/
@@ -179,56 +179,56 @@ GREATER_THAN.2                    : />/
 GREATER_THAN_OR_EQUAL_TO.3        : />=/
 
 // The keyword to begin an ‘if-then-else’ expression.
-IF.2                              : /if/
+IF.2                              : /if\b/i
 
 // Returns TRUE when two objects are equal.
 // Note that not all objects can be tested for equality.
 // Equivalent to the ‘=’ operator.
-IS.2                              : /is/
+IS.2                              : /is\b/i
 
 // The ‘>’ comparison.
-IS_GREATER_THAN.3                 : /is\s+greater\s+than/
+IS_GREATER_THAN.3                 : /is\s+greater\s+than\b/i
 
 // The ‘>=’ comparison.
-IS_GREATER_THAN_OR_EQUAL_TO.4     : /is\s+greater\s+than\s+or\s+equal\s+to/
+IS_GREATER_THAN_OR_EQUAL_TO.4     : /is\s+greater\s+than\s+or\s+equal\s+to\b/i
 
 // The ‘<’ comparison.
-IS_LESS_THAN.3                    : /is\s+less\s+than/
+IS_LESS_THAN.3                    : /is\s+less\s+than\b/i
 
 // The ‘<=’ comparison.
-IS_LESS_THAN_OR_EQUAL_TO.4        : /is\s+less\s+than\s+or\s+equal\s+to/
+IS_LESS_THAN_OR_EQUAL_TO.4        : /is\s+less\s+than\s+or\s+equal\s+to\b/i
 
 // Returns TRUE when two objects are not equal.
 // Note that not all objects can be compared with this keyword.
-IS_NOT.3                          : /is\s+not/
+IS_NOT.3                          : /is\s+not\b/i
 
 // Returns TRUE when a string does not contain another string as a substring.
-IS_NOT_CONTAINED_BY.4             : /is\s+not\s+contained\s+by/
+IS_NOT_CONTAINED_BY.4             : /is\s+not\s+contained\s+by\b/i
 
 // Equivalent to the keyword ‘is not’ and the ‘!=’ operator.
-IS_NOT_EQUAL_TO.4                 : /is\s+not\s+equal\s+to/
+IS_NOT_EQUAL_TO.4                 : /is\s+not\s+equal\s+to\b/i
 
 // Equivalent to is less than or equal to or ‘<=’.
-IS_NOT_GREATER_THAN.4             : /is\s+not\s+greater\s+than/
+IS_NOT_GREATER_THAN.4             : /is\s+not\s+greater\s+than\b/i
 
 // Equivalent to is less than or ‘<’.
-IS_NOT_GREATER_THAN_OR_EQUAL_TO.5 : /is\s+not\s+greater\s+than\s+or\s+equal\s+to/
+IS_NOT_GREATER_THAN_OR_EQUAL_TO.5 : /is\s+not\s+greater\s+than\s+or\s+equal\s+to\b/i
 
 // Equivalent to is greater than or equal to or ‘>=’.
-IS_NOT_LESS_THAN.4                : /is\s+not\s+less\s+than/
+IS_NOT_LESS_THAN.4                : /is\s+not\s+less\s+than\b/i
 
 // Equivalent to is greater than or ‘>’.
-IS_NOT_LESS_THAN_OR_EQUAL_TO.5    : /is\s+not\s+less\s+than\s+or\s+equal\s+to/
+IS_NOT_LESS_THAN_OR_EQUAL_TO.5    : /is\s+not\s+less\s+than\s+or\s+equal\s+to\b/i
 
 // A reference to the closest direct object or ‘whose’ clause.
-IT.2                              : /it/
+IT.2                              : /it\b/i
 
 // Used to index into a tuple.
 // Always returns a singular value.
-ITEM.3                            : /item/
+ITEM.3                            : /item\b/i
 
 // Equivalent to item, but returns a plural value.
-ITEMS.4                           : /items/
+ITEMS.4                           : /items\b/i
 
 LEFT_PARENTHESIS.2                : /\(/
 
@@ -239,30 +239,30 @@ LESS_THAN.2                       : /</
 LESS_THAN_OR_EQUAL_TO.3           : /<=/
 
 // The modulo operator.
-MOD.2                             : /mod/
+MOD.2                             : /mod\b/i
 
 // The multiplication operator.
 MULTIPLICATION.2                  : /\*/
 
 // The logical NOT operator.
-NOT.2                             : /not/
+NOT.2                             : /not\b/i
 
-NOT_EXISTS.3                      : /not\s+exists/
+NOT_EXISTS.3                      : /not\s+exists\b/i
 
 // Returns the number of results in an expression.
-NUMBER.2                          : /number/
+NUMBER.2                          : /number\b/i
 
 // Used to access a property of an object.
-OF.2                              : /of/
+OF.2                              : /of\b/i
 
 // The logical OR operator.
 // Doesn’t evaluate the right hand side if the left hand side is true.
-OR.2                              : /or/
+OR.2                              : /or\b/i
 
 RIGHT_PARENTHESIS.2               : /\)/
 
 // Returns TRUE when a string begins with the specified substring.
-STARTS_WITH.2                     : /starts\s+with/
+STARTS_WITH.2                     : /starts\s+with\b/i
 
 // The string concatenation operator.
 STRING_CONCATENATION.2            : /\&/
@@ -274,14 +274,14 @@ SUBTRACTION.2                     : /\-/
 SUM.2                             : /\+/
 
 // Denotes the main path to take in an if-then-else expression.
-THEN.3                            : /then/
+THEN.3                            : /then\b/i
 
 // The tuple operator.
 // Creates a tuple of objects.
 TUPLE.2                           : /,/
 
 // Used along with the ‘it’ keyword to filter plural results.
-WHOSE.2                           : /whose/
+WHOSE.2                           : /whose\b/i
 
 
 // %import .relevance_csv.parentheses_expr

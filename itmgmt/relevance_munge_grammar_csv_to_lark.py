@@ -479,7 +479,10 @@ class RGToken:
         escaped_words = list(map(re.escape, words))
         escaped = r"\s+".join(escaped_words)
         escaped = escaped.replace("/", r"\/")
-        return "/" + escaped + "/"
+        if any(map(str.isalpha, self.tok)):
+            return "/" + escaped + r"\b/i"
+        else:
+            return "/" + escaped + "/"
 
 
 @dataclasses.dataclass
