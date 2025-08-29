@@ -4,7 +4,7 @@ The following sshd_config setting lets us track file transfers:
 
 But the sshd script in logwatch is not expecting all those extra log records,
 and adds them to "**Unmatched Entries**".  When there are a lot of different
-files getting transferred, then postifx complains "File too large" (when run
+files getting transferred, then postfix complains "File too large" (when run
 under cron.daily as configured on RHEL8).
 
 This patch:
