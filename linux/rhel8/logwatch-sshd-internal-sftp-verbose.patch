@@ -1,0 +1,58 @@
+--- /usr/share/logwatch/scripts/services/sshd	2023-06-28 14:01:01.000000000 -0500
++++ /etc/logwatch/scripts/services/sshd	2025-08-29 12:42:52.999147169 -0500
+@@ -238,6 +238,11 @@
+ my $Starts = 0;
+ my $NetworkErrors = 0;
+
++# internal-sftp VERBOSE
++my $ClosedFileCount = 0;
++my $ClosedFileBytesRead = 0;
++my $ClosedFileBytesWritten = 0;
++
+ if ( $Debug >= 5 ) {
+    print STDERR "\n\nDEBUG: Inside SSHD Filter \n\n";
+    $DebugCounter = 1;
+@@ -458,6 +463,25 @@
+       $ChownErr{"$File,$From,$To,$Why"}++;
+    } elsif (my ($user,$relm) = ($ThisLine =~ /Authorized to ([^ ]+), krb5 principal \1@([^ ]+) \(krb5_kuserok\)/)) {
+       $Krb_relm{$relm}{$user}++;
++   } elsif (
++       ($ThisLine =~ /\bAccepted key .* found at\b/) or
++       ($ThisLine =~ /\bChanged root directory to ".*"/) or
++       ($ThisLine =~ /\bClose session: user .* from .* port \d+ id \d+/) or
++       ($ThisLine =~ /\bDisconnected from user\b/) or
++       ($ThisLine =~ /\bTransferred: sent \d+, received \d+ bytes\b/) or
++       ($ThisLine =~ /\breceived client version\b/) or
++       ($ThisLine =~ /\bsent status No such file\b/) or
++       ($ThisLine =~ /\bsession (opened|closed) for local user .* from\b/) or
++       ($ThisLine =~ /\b(opendir|closedir|l?stat name|realpath) ".*"/) or
++       ($ThisLine =~ /\bopen ".*" flags .* mode .*/)
++   ) {
++      # internal-sftp VERBOSE
++      # Ignore these
++   } elsif (my ($bytesRead, $bytesWritten) = ($ThisLine =~ /\bclose ".*" bytes read (\d+) written (\d+)/)) {
++      # internal-sftp VERBOSE
++      $ClosedFileCount++;
++      $ClosedFileBytesRead += $bytesRead;
++      $ClosedFileBytesWritten += $bytesWritten;
+    } else {
+       # Report any unmatched entries...
+       unless ($ThisLine =~ /fwd X11 connect/) {
+@@ -835,6 +859,17 @@
+   }
+ }
+
++# internal-sftp VERBOSE
++if ($ClosedFileCount > 0) {
++   $ClosedFileCount        =~ s/(?<=\d)(?=(\d{3})+(?!\d))/,/g;
++   $ClosedFileBytesRead    =~ s/(?<=\d)(?=(\d{3})+(?!\d))/,/g;
++   $ClosedFileBytesWritten =~ s/(?<=\d)(?=(\d{3})+(?!\d))/,/g;
++   print "\nFiles transferred via internal-sftp\n";
++   print "   Total files:    ",$ClosedFileCount,"\n";
++   print "   Bytes read:     ",$ClosedFileBytesRead,"\n";
++   print "   Bytes written:  ",$ClosedFileBytesWritten,"\n";
++}
++
+ if (keys %OtherList) {
+    print "\n**Unmatched Entries**\n";
+    print "$_ : $OtherList{$_} time(s)\n" foreach keys %OtherList;
