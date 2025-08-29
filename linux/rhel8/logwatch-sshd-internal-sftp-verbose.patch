@@ -1,3 +1,20 @@
+The following sshd_config setting lets us track file transfers:
+
+    subsystem sftp internal-sftp -l VERBOSE
+
+But the sshd script in logwatch is not expecting all those extra log records,
+and adds them to "**Unmatched Entries**".  When there are a lot of different
+files getting transferred, then postifx complains "File too large" (when run
+under cron.daily as configured on RHEL8).
+
+This patch:
+
+ * ignores the extra log records caused by the VERBOSE setting
+ * collects minimal statistics on the files that were transferred
+
+
+This patch is against logwatch-7.4.3-21.el8.noarch.
+
 --- /usr/share/logwatch/scripts/services/sshd	2023-06-28 14:01:01.000000000 -0500
 +++ /etc/logwatch/scripts/services/sshd	2025-08-29 12:42:52.999147169 -0500
 @@ -238,6 +238,11 @@
