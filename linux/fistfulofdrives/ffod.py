@@ -293,18 +293,33 @@ LSBLK = "/usr/bin/lsblk"
 
 def list_block_devices(
     devices: list[str] = None,
-    outputkeys: list[str] = None,
+    outputkeys: list[str] = "*",
     filter: str = None,
+    inbytes: bool = True,
 ) -> list[BlockDevice]:
     args = []
+
+    if inbytes:
+        args.append("--bytes")
+
     if filter is not None:
         args.append("--filter")
         args.append(filter)
-    if outputkeys is not None:
-        args.append("--output")
-        args.append(",".join(outputkeys))
+
+    if isinstance(outputkeys, str):
+        outputkeys = [outputkeys]
+    if isinstance(outputkeys, list):
+        if "*" in outputkeys:
+            args.append("--output-all")
+        else:
+            args.append("--output")
+            args.append(",".join(outputkeys))
+    elif outputkeys is not None:
+        raise ValueError("unexpected outputkeys", outputkeys)
+
     if devices is not None:
         args.extend(devices)
+
     data = lsblk(*args)
     blockdevices: list[BlockDevice] = []
     for bddata in data["blockdevices"]:
