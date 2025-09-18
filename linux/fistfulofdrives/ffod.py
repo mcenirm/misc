@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import functools
 import json
 import keyword
 import pathlib
 import shlex
+import sqlite3
 import subprocess
 import sys
 import types
@@ -15,6 +17,7 @@ import uuid
 
 FFOD_MOUNT_TREE = pathlib.Path("/media/ffod")
 FFOD_IGNORE_ME_FILE = "ffod.ignore.txt"
+FFOD_DB = pathlib.Path(__file__).parent / "ffod.db"
 
 
 def main():
@@ -23,11 +26,20 @@ def main():
         return
 
     vols = get_volumes_on_usb_devices()
+    vols = ensure_volumes_are_ready(vols)
+    if not vols:
+        return
+
+    con = sqlite3.connect(FFOD_DB)
+    ensure_db_schema(con)
+
+
+def ensure_volumes_are_ready(vols: list[BlockDevice]) -> list[BlockDevice]:
     vols_that_need_remount: list[tuple[BlockDevice, pathlib.Path]] = []
     vols_with_bad_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
     vols_that_need_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
     vols_that_need_mount: list[tuple[BlockDevice, pathlib.Path]] = []
-    good_vols: list[tuple[BlockDevice, pathlib.Path]] = []
+    good_vols: list[BlockDevice] = []
     for vol in vols:
         allgood = True
         expected_mountpoint = FFOD_MOUNT_TREE / f"{vol.label},{vol.uuid}"
@@ -45,14 +57,14 @@ def main():
             allgood = False
             vols_that_need_mount.append((vol, expected_mountpoint))
         if allgood:
-            good_vols.append((vol, expected_mountpoint))
+            good_vols.append(vol)
 
-    dump_table([[vol.name, vol.fstype, expmt] for vol, expmt in good_vols])
+    dump_table([[vol.name, vol.fstype, vol.mountpoint] for vol in good_vols])
 
     if vols_with_bad_mountpoint:
         print("!!!! FIX MOUNTPOINT (should be directory) !!!!")
         dump_table([[vol.name, expmt] for vol, expmt in vols_with_bad_mountpoint])
-        return
+        return []
     if vols_that_need_remount:
         print("!!!! UNMOUNT AND REMOUNT !!!!")
         dump_table(
@@ -61,7 +73,7 @@ def main():
                 for vol, expmt in vols_with_bad_mountpoint
             ]
         )
-        return
+        return []
     if vols_that_need_mountpoint:
         print("# need mountpoint")
         dump_table([["#", vol.name, expmt] for vol, expmt in vols_that_need_mountpoint])
@@ -74,6 +86,10 @@ def main():
         for vol, expmt in vols_that_need_mount:
             print(f"sudo mount -v UUID={vol.uuid} {shlex.quote(str(expmt))}")
         print()
+    if vols_that_need_mountpoint or vols_that_need_mount:
+        return []
+
+    return good_vols
 
 
 def get_volumes_on_usb_devices() -> list[BlockDevice]:
@@ -533,6 +549,42 @@ def dump_table(table: list[list[str]], print=print):
             widths[i] = max(widths[i], len(cell))
     for row in table:
         print(*[c.ljust(w) for c, w in zip(row, widths)])
+
+
+FFOD_DB_SCHEMA = {
+    "vol": "CREATE TABLE vol (id INTEGER PRIMARY KEY, label TEXT, uuid TEXT)",
+}
+
+
+def ensure_db_schema(
+    con: sqlite3.Connection, expected_schema: dict[str, str] = FFOD_DB_SCHEMA
+):
+    cur = con.cursor()
+    try:
+        cur.execute("SELECT type, name, sql FROM sqlite_schema")
+        print("----")
+        actual_schema: dict[str, str] = {}
+        for ddltype, ddlname, ddlsql in cur.fetchall():
+            print(ddltype, ddlname, ddlsql)
+            actual_schema[ddlname] = ddlsql
+        print("----")
+        for expname, expsql in expected_schema.items():
+            if expname not in actual_schema:
+                print("missing:", expname, expsql)
+                cur.execute(expsql)
+            elif expsql != actual_schema[expname]:
+                print("mismatch:", expname)
+                for opcode, a0, a1, b0, b1 in difflib.SequenceMatcher(
+                    None, expsql, actual_schema[expname]
+                ).get_opcodes():
+                    print("-", opcode, a0, a1, b0, b1)
+        print("----")
+        for actname, actsql in actual_schema.items():
+            if actname not in expected_schema:
+                print("extra:", actname, actsql)
+        print("----")
+    finally:
+        cur.close()
 
 
 if __name__ == "__main__":
