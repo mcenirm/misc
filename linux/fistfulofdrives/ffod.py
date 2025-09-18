@@ -7,6 +7,7 @@ import pathlib
 import shlex
 import subprocess
 import sys
+import types
 import typing
 
 
@@ -36,11 +37,17 @@ def get_usb_devices() -> list[BlockDevice]:
 METADATA_HOLDER = "holder"
 METADATA_KEY = "key"
 METADATA_DESC = "desc"
-LSBLK_KNOWN_PLURALS = ["fsroots", "mountpoints"]
+LSBLK_KNOWN_PLURALS = {"FSROOTS", "MOUNTPOINTS"}
 
 
 def _regenerate_block_device_class_from_lsblk():
-    typemap = dict(string=str, integer=int, boolean=bool, size=DataSize)
+    typemap = {
+        "string": str.__name__,
+        "[string]": list.__name__ + "[" + str.__name__ + "]",
+        "integer": int.__name__,
+        "boolean": bool.__name__,
+        "size": DataSize.__name__,
+    }
     bytesdescsuffix = ", use <number> if --bytes is given"
     bytestypenames = {"number", "string"}
     sizetypenames = {"size"}
@@ -68,7 +75,16 @@ def _regenerate_block_device_class_from_lsblk():
         name = holder.lower().replace("-", "_").replace(":", "_").replace("%", "_pct")
         assert not keyword.iskeyword(name), (name, holder, desc)
         assert name.isidentifier(), (name, holder, desc)
-        typelistasstr = " | ".join([typemap[n].__name__ for n in typenames])
+
+        # TODO is this assertion necessary?
+        assert len(typenames) == 1, (holder, typenames, desc)
+        if holder in LSBLK_KNOWN_PLURALS:
+            sortedsimpletypenames = sorted(typenames)
+            typenames = []
+            for n in sortedsimpletypenames:
+                typenames.append(n)
+                typenames.append("[" + n + "]")
+        typelistasstr = "|".join([typemap[n] for n in typenames])
 
         print(
             "    "
@@ -92,10 +108,29 @@ class _DataclassTypeFixer:
             if curval is None:
                 continue
             expected_type = hints[fld.name]
-            actual_type = type(curval)
-            if actual_type != expected_type:
-                newval = expected_type(curval)
+            newval = coerce_value_to_type(curval, expected_type)
+            if newval is not curval:
                 object.__setattr__(self, fld.name, newval)
+
+
+def coerce_value_to_type(value: object, targettype: type) -> object:
+    actual_type = type(value)
+    if actual_type == targettype:
+        return value
+    else:
+        if isinstance(targettype, types.UnionType):
+            also_try_str = False
+            for subtype in targettype.__args__:
+                if subtype is str:
+                    also_try_str = True
+                else:
+                    try:
+                        return coerce_value_to_type(value, subtype)
+                    except TypeError as te:
+                        pass
+            if also_try_str:
+                return str(value)
+        return targettype(value)
 
 
 @dataclasses.dataclass
@@ -141,7 +176,7 @@ class BlockDevice(_DataclassConciseRepr, _DataclassTypeFixer):
     fsavail: DataSize = _f(
         "FSAVAIL", "filesystem size available for unprivileged users"
     )
-    fsroots: str = _f("FSROOTS", "mounted filesystem roots")
+    fsroots: str | list[str] = _f("FSROOTS", "mounted filesystem roots")
     fssize: DataSize = _f("FSSIZE", "filesystem size")
     fstype: str = _f("FSTYPE", "filesystem type")
     fsused: DataSize = _f("FSUSED", "filesystem size used")
@@ -188,7 +223,9 @@ class BlockDevice(_DataclassConciseRepr, _DataclassTypeFixer):
     state: str = _f("STATE", "state of the device")
     subsystems: str = _f("SUBSYSTEMS", "de-duplicated chain of subsystems")
     mountpoint: str = _f("MOUNTPOINT", "where the device is mounted")
-    mountpoints: str = _f("MOUNTPOINTS", "all locations where device is mounted")
+    mountpoints: str | list[str] = _f(
+        "MOUNTPOINTS", "all locations where device is mounted"
+    )
     tran: str = _f("TRAN", "device transport type")
     type: str = _f("TYPE", "device type")
     uuid: str = _f("UUID", "filesystem UUID")
