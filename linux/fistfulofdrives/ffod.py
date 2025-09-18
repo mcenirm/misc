@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import keyword
 import pathlib
@@ -9,6 +10,11 @@ import subprocess
 import sys
 import types
 import typing
+import uuid
+
+
+FFOD_MOUNT_TREE = pathlib.Path("/media/ffod")
+FFOD_IGNORE_ME_FILE = "ffod.ignore.txt"
 
 
 def main():
@@ -16,22 +22,110 @@ def main():
         _regenerate_block_device_class_from_lsblk()
         return
 
-    usbvols = get_volumes_on_usb_devices()
+    vols = get_volumes_on_usb_devices()
+    vols_that_need_remount: list[tuple[BlockDevice, pathlib.Path]] = []
+    vols_with_bad_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
+    vols_that_need_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
+    vols_that_need_mount: list[tuple[BlockDevice, pathlib.Path]] = []
+    good_vols: list[tuple[BlockDevice, pathlib.Path]] = []
+    for vol in vols:
+        allgood = True
+        expected_mountpoint = FFOD_MOUNT_TREE / f"{vol.label},{vol.uuid}"
+        actual_mountpoint = pathlib.Path(vol.mountpoint) if vol.mountpoint else None
+        if not expected_mountpoint.is_dir(follow_symlinks=False):
+            allgood = False
+            if expected_mountpoint.exists():
+                vols_with_bad_mountpoint.append((vol, expected_mountpoint))
+            else:
+                vols_that_need_mountpoint.append((vol, expected_mountpoint))
+        if actual_mountpoint and actual_mountpoint != expected_mountpoint:
+            allgood = False
+            vols_that_need_remount.append((vol, expected_mountpoint))
+        elif not actual_mountpoint:
+            allgood = False
+            vols_that_need_mount.append((vol, expected_mountpoint))
+        if allgood:
+            good_vols.append((vol, expected_mountpoint))
+
+    dump_table([[vol.name, vol.fstype, expmt] for vol, expmt in good_vols])
+
+    if vols_with_bad_mountpoint:
+        print("!!!! FIX MOUNTPOINT (should be directory) !!!!")
+        dump_table([[vol.name, expmt] for vol, expmt in vols_with_bad_mountpoint])
+        return
+    if vols_that_need_remount:
+        print("!!!! UNMOUNT AND REMOUNT !!!!")
+        dump_table(
+            [
+                [vol.name, vol.mountpoint, expmt]
+                for vol, expmt in vols_with_bad_mountpoint
+            ]
+        )
+        return
+    if vols_that_need_mountpoint:
+        print("# need mountpoint")
+        dump_table([["#", vol.name, expmt] for vol, expmt in vols_that_need_mountpoint])
+        for vol, expmt in vols_that_need_mountpoint:
+            print(f"sudo mkdir -v {shlex.quote(str(expmt))}    #  {vol.name}")
+        print()
+    if vols_that_need_mount:
+        print("# need mount")
+        dump_table([["#", vol.name, expmt] for vol, expmt in vols_that_need_mount])
+        for vol, expmt in vols_that_need_mount:
+            print(f"sudo mount -v UUID={vol.uuid} {shlex.quote(str(expmt))}")
+        print()
 
 
 def get_volumes_on_usb_devices() -> list[BlockDevice]:
     usbdevs = get_usb_devices()
-    childdevs = list_block_devices(
-        devices=[d.path for d in usbdevs], filter=FILTER_NOT_USB
-    )
-    # TODO determine which ones are "volumes"
-    for i, d in enumerate(childdevs, 1):
-        print(i, d)
+    candidates = list_block_devices(devices=[d.path for d in usbdevs])
+    vols = [bd for bd in candidates if is_volume(bd) and not ignore_volume(bd)]
+    return vols
 
 
 def get_usb_devices() -> list[BlockDevice]:
     trankey, pathkey = (BLOCKDEVICE_NAME_TO_KEY[n] for n in ["tran", "path"])
     return list_block_devices(outputkeys=[pathkey, trankey], filter=FILTER_USB)
+
+
+def is_volume(bd: BlockDevice) -> bool:
+    if bd.fstype is not None:
+        return True
+    return False
+
+
+IGNORE_PARTTYPE_UUIDS = {
+    uuid.UUID("c12a7328-f81f-11d2-ba4b-00a0c93ec93b"): ("EFI System Partition", "ESP"),
+    uuid.UUID("e3c9e316-0b5c-4db8-817d-f92df00215ae"): (
+        "Microsoft Reserved Partition",
+        "MSR",
+    ),
+}
+IGNORE_FSTYPES = {
+    "ntfs": "NTFS",
+}
+
+
+def ignore_volume(bd: BlockDevice) -> bool:
+    try:
+        if uuid.UUID(bd.parttype) in IGNORE_PARTTYPE_UUIDS:
+            return True
+    except ValueError:
+        pass
+
+    if bd.fstype in IGNORE_FSTYPES:
+        return True
+
+    try:
+        if (
+            bd.mountpoint
+            and (pathlib.Path(bd.mountpoint) / FFOD_IGNORE_ME_FILE).exists()
+        ):
+            return True
+    except PermissionError:
+        pass
+
+    return False
 
 
 METADATA_HOLDER = "holder"
@@ -297,7 +391,7 @@ def list_block_devices(
     filter: str = None,
     inbytes: bool = True,
 ) -> list[BlockDevice]:
-    args = []
+    args = ["--list"]
 
     if inbytes:
         args.append("--bytes")
@@ -338,7 +432,7 @@ def lsblk(*args: str, _exe=LSBLK) -> object:
     return json.loads(lsblk_as_text("--json", *args, _exe=_exe))
 
 
-def setx(args: list[str]):
+def setx(args: list[str], print=functools.partial(print, file=sys.stderr)):
     print("++", *[shlex.quote(a) for a in args])
 
 
@@ -429,6 +523,16 @@ class Blkid(Cmd):
 
     def devices(self) -> list[str]:
         return list(self.run_lines({"--output": "device"}))
+
+
+def dump_table(table: list[list[str]], print=print):
+    table = [[str(cell) for cell in row] for row in table]
+    widths = [0] * max([len(row) for row in table])
+    for row in table:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+    for row in table:
+        print(*[c.ljust(w) for c, w in zip(row, widths)])
 
 
 if __name__ == "__main__":
