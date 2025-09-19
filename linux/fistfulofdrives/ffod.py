@@ -10,31 +10,35 @@ import shlex
 import sqlite3
 import subprocess
 import sys
+import tomllib
 import types
 import typing
 import uuid
 
 
-FFOD_MOUNT_TREE = pathlib.Path("/media/ffod")
-FFOD_IGNORE_ME_FILE = "ffod.ignore.txt"
-FFOD_DB = pathlib.Path(__file__).parent / "ffod.db"
-
-
-def main():
+def main(cfgfile: pathlib.Path = None):
     if "--regenerate-block-device-class-from-lsblk" in sys.argv:
         _regenerate_block_device_class_from_lsblk()
         return
 
+    cfg = Config()
+    if cfgfile is not None:
+        cfg.toml_file = cfgfile
+    cfg.load()
+
     vols = get_volumes_on_usb_devices()
-    vols = ensure_volumes_are_ready(vols)
+    vols = [bd for bd in vols if not ignore_volume(bd, cfg.ignore_volume_filename)]
+    vols = ensure_volumes_are_ready(vols, cfg.mount_tree)
     if not vols:
         return
 
-    con = sqlite3.connect(FFOD_DB)
+    con = sqlite3.connect(cfg.db_file)
     ensure_db_schema(con)
 
 
-def ensure_volumes_are_ready(vols: list[BlockDevice]) -> list[BlockDevice]:
+def ensure_volumes_are_ready(
+    vols: list[BlockDevice], mount_tree: pathlib.Path
+) -> list[BlockDevice]:
     vols_that_need_remount: list[tuple[BlockDevice, pathlib.Path]] = []
     vols_with_bad_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
     vols_that_need_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
@@ -42,7 +46,7 @@ def ensure_volumes_are_ready(vols: list[BlockDevice]) -> list[BlockDevice]:
     good_vols: list[BlockDevice] = []
     for vol in vols:
         allgood = True
-        expected_mountpoint = FFOD_MOUNT_TREE / f"{vol.label},{vol.uuid}"
+        expected_mountpoint = mount_tree / f"{vol.label},{vol.uuid}"
         actual_mountpoint = pathlib.Path(vol.mountpoint) if vol.mountpoint else None
         if not expected_mountpoint.is_dir(follow_symlinks=False):
             allgood = False
@@ -95,7 +99,7 @@ def ensure_volumes_are_ready(vols: list[BlockDevice]) -> list[BlockDevice]:
 def get_volumes_on_usb_devices() -> list[BlockDevice]:
     usbdevs = get_usb_devices()
     candidates = list_block_devices(devices=[d.path for d in usbdevs])
-    vols = [bd for bd in candidates if is_volume(bd) and not ignore_volume(bd)]
+    vols = [bd for bd in candidates if is_volume(bd)]
     return vols
 
 
@@ -122,7 +126,7 @@ IGNORE_FSTYPES = {
 }
 
 
-def ignore_volume(bd: BlockDevice) -> bool:
+def ignore_volume(bd: BlockDevice, ignore_volume_filename: str) -> bool:
     try:
         if uuid.UUID(bd.parttype) in IGNORE_PARTTYPE_UUIDS:
             return True
@@ -135,7 +139,7 @@ def ignore_volume(bd: BlockDevice) -> bool:
     try:
         if (
             bd.mountpoint
-            and (pathlib.Path(bd.mountpoint) / FFOD_IGNORE_ME_FILE).exists()
+            and (pathlib.Path(bd.mountpoint) / ignore_volume_filename).exists()
         ):
             return True
     except PermissionError:
@@ -549,6 +553,63 @@ def dump_table(table: list[list[str]], print=print):
             widths[i] = max(widths[i], len(cell))
     for row in table:
         print(*[c.ljust(w) for c, w in zip(row, widths)])
+
+
+@dataclasses.dataclass
+class Config:
+    app_name: str = "ffod"
+
+    mount_tree: pathlib.Path = pathlib.Path("/media/ffod")
+    state_tree: pathlib.Path = pathlib.Path(__file__).parent
+    index_tree: pathlib.Path = None
+    copy_tree: pathlib.Path = None
+
+    toml_suffix: str = ".toml"
+    ignore_volume_file_prefix: str = "."
+    ignore_volume_file_suffix: str = ".ignore.volume.txt"
+    db_suffix: str = ".db"
+
+    _toml_file: pathlib.Path = None
+    _ignore_volume_filename: str = None
+    _db_file: pathlib.Path = None
+
+    @property
+    def toml_file(self) -> pathlib.Path:
+        return self._toml_file or (
+            self.state_tree / f"{self.app_name}{self.toml_suffix}"
+        )
+
+    @toml_file.setter
+    def toml_file(self, value):
+        self._toml_file = value
+
+    @property
+    def ignore_volume_filename(self) -> str:
+        return (
+            self._ignore_volume_filename
+            or f"{self.ignore_volume_file_prefix}{self.app_name}{self.ignore_volume_file_suffix}"
+        )
+
+    @ignore_volume_filename.setter
+    def ignore_volume_filename(self, value):
+        self._ignore_volume_filename = value
+
+    @property
+    def db_file(self) -> pathlib.Path:
+        return self._db_file or self.state_tree / f"{self.app_name}{self.db_suffix}"
+
+    @db_file.setter
+    def db_file(self, value):
+        self._db_file = value
+
+    def load(self):
+        with self.toml_file.open("rb") as f:
+            data = tomllib.load(f)
+        for k, v in data.items():
+            n = k.replace("-", "_")
+            if n.endswith("_tree") or n.endswith("_file"):
+                v = pathlib.Path(v)
+            setattr(self, n, v)
 
 
 FFOD_DB_SCHEMA = {
