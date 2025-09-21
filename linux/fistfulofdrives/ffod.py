@@ -36,86 +36,11 @@ def main(cfgfile: pathlib.Path = None):
     ensure_db_schema(con)
 
 
-def ensure_volumes_are_ready(
-    vols: list[BlockDevice], mount_tree: pathlib.Path
-) -> list[BlockDevice]:
-    vols_that_need_remount: list[tuple[BlockDevice, pathlib.Path]] = []
-    vols_with_bad_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
-    vols_that_need_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
-    vols_that_need_mount: list[tuple[BlockDevice, pathlib.Path]] = []
-    good_vols: list[BlockDevice] = []
-    for vol in vols:
-        allgood = True
-        expected_mountpoint = mount_tree / f"{vol.label},{vol.uuid}"
-        actual_mountpoint = pathlib.Path(vol.mountpoint) if vol.mountpoint else None
-        if not expected_mountpoint.is_dir(follow_symlinks=False):
-            allgood = False
-            if expected_mountpoint.exists():
-                vols_with_bad_mountpoint.append((vol, expected_mountpoint))
-            else:
-                vols_that_need_mountpoint.append((vol, expected_mountpoint))
-        if actual_mountpoint and actual_mountpoint != expected_mountpoint:
-            allgood = False
-            vols_that_need_remount.append((vol, expected_mountpoint))
-        elif not actual_mountpoint:
-            allgood = False
-            vols_that_need_mount.append((vol, expected_mountpoint))
-        if allgood:
-            good_vols.append(vol)
-
-    dump_table([[vol.name, vol.fstype, vol.mountpoint] for vol in good_vols])
-
-    if vols_with_bad_mountpoint:
-        print("!!!! FIX MOUNTPOINT (should be directory) !!!!")
-        dump_table([[vol.name, expmt] for vol, expmt in vols_with_bad_mountpoint])
-        return []
-    if vols_that_need_remount:
-        print("!!!! UNMOUNT AND REMOUNT !!!!")
-        dump_table(
-            [
-                [vol.name, vol.mountpoint, expmt]
-                for vol, expmt in vols_with_bad_mountpoint
-            ]
-        )
-        return []
-    if vols_that_need_mountpoint:
-        print("# need mountpoint")
-        dump_table([["#", vol.name, expmt] for vol, expmt in vols_that_need_mountpoint])
-        for vol, expmt in vols_that_need_mountpoint:
-            print(f"sudo mkdir -v {shlex.quote(str(expmt))}    #  {vol.name}")
-        print()
-    if vols_that_need_mount:
-        print("# need mount")
-        dump_table([["#", vol.name, expmt] for vol, expmt in vols_that_need_mount])
-        for vol, expmt in vols_that_need_mount:
-            print(f"sudo mount -v UUID={vol.uuid} {shlex.quote(str(expmt))}")
-        print()
-    if vols_that_need_mountpoint or vols_that_need_mount:
-        return []
-
-    return good_vols
-
-
-def get_volumes_on_usb_devices() -> list[BlockDevice]:
-    usbdevs = get_usb_devices()
-    candidates = list_block_devices(devices=[d.path for d in usbdevs])
-    vols = [bd for bd in candidates if is_volume(bd)]
-    return vols
-
-
-def get_usb_devices() -> list[BlockDevice]:
-    trankey, pathkey = (BLOCKDEVICE_NAME_TO_KEY[n] for n in ["tran", "path"])
-    return list_block_devices(outputkeys=[pathkey, trankey], filter=FILTER_USB)
-
-
-def is_volume(bd: BlockDevice) -> bool:
-    if bd.fstype is not None:
-        return True
-    return False
-
-
 IGNORE_PARTTYPE_UUIDS = {
-    uuid.UUID("c12a7328-f81f-11d2-ba4b-00a0c93ec93b"): ("EFI System Partition", "ESP"),
+    uuid.UUID("c12a7328-f81f-11d2-ba4b-00a0c93ec93b"): (
+        "EFI System Partition",
+        "ESP",
+    ),
     uuid.UUID("e3c9e316-0b5c-4db8-817d-f92df00215ae"): (
         "Microsoft Reserved Partition",
         "MSR",
@@ -124,28 +49,6 @@ IGNORE_PARTTYPE_UUIDS = {
 IGNORE_FSTYPES = {
     "ntfs": "NTFS",
 }
-
-
-def ignore_volume(bd: BlockDevice, ignore_volume_filename: str) -> bool:
-    try:
-        if uuid.UUID(bd.parttype) in IGNORE_PARTTYPE_UUIDS:
-            return True
-    except ValueError:
-        pass
-
-    if bd.fstype in IGNORE_FSTYPES:
-        return True
-
-    try:
-        if (
-            bd.mountpoint
-            and (pathlib.Path(bd.mountpoint) / ignore_volume_filename).exists()
-        ):
-            return True
-    except PermissionError:
-        pass
-
-    return False
 
 
 METADATA_HOLDER = "holder"
@@ -364,7 +267,9 @@ BLOCKDEVICE_KEY_TO_NAME: dict[str, str] = {
 FILTER_USB, FILTER_NOT_USB = (
     f'{BLOCKDEVICE_NAME_TO_KEY["tran"]} {op} "usb"' for op in ["eq", "ne"]
 )
-
+USB_DEVICES_OUTPUT_KEYS = [
+    BLOCKDEVICE_NAME_TO_KEY[n] for n in ["tran", "path", "vendor", "model", "serial"]
+]
 
 IEC_MULTIPLIERS = {
     "K": 1024,
@@ -400,6 +305,108 @@ class DataSize:
 
     def __repr__(self):
         return self.__class__.__name__ + "(" + repr(self.origval) + ")"
+
+
+def ensure_volumes_are_ready(
+    vols: list[BlockDevice], mount_tree: pathlib.Path
+) -> list[BlockDevice]:
+    vols_that_need_remount: list[tuple[BlockDevice, pathlib.Path]] = []
+    vols_with_bad_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
+    vols_that_need_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
+    vols_that_need_mount: list[tuple[BlockDevice, pathlib.Path]] = []
+    good_vols: list[BlockDevice] = []
+    for vol in vols:
+        allgood = True
+        expected_mountpoint = mount_tree / f"{vol.label},{vol.uuid}"
+        actual_mountpoint = pathlib.Path(vol.mountpoint) if vol.mountpoint else None
+        if not expected_mountpoint.is_dir(follow_symlinks=False):
+            allgood = False
+            if expected_mountpoint.exists():
+                vols_with_bad_mountpoint.append((vol, expected_mountpoint))
+            else:
+                vols_that_need_mountpoint.append((vol, expected_mountpoint))
+        if actual_mountpoint and actual_mountpoint != expected_mountpoint:
+            allgood = False
+            vols_that_need_remount.append((vol, expected_mountpoint))
+        elif not actual_mountpoint:
+            allgood = False
+            vols_that_need_mount.append((vol, expected_mountpoint))
+        if allgood:
+            good_vols.append(vol)
+
+    dump_table([[vol.name, vol.fstype, vol.mountpoint] for vol in good_vols])
+
+    if vols_with_bad_mountpoint:
+        print("!!!! FIX MOUNTPOINT (should be directory) !!!!")
+        dump_table([[vol.name, expmt] for vol, expmt in vols_with_bad_mountpoint])
+        return []
+    if vols_that_need_remount:
+        print("!!!! UNMOUNT AND REMOUNT !!!!")
+        dump_table(
+            [
+                [vol.name, vol.mountpoint, expmt]
+                for vol, expmt in vols_with_bad_mountpoint
+            ]
+        )
+        return []
+    if vols_that_need_mountpoint:
+        print("# need mountpoint")
+        dump_table([["#", vol.name, expmt] for vol, expmt in vols_that_need_mountpoint])
+        for vol, expmt in vols_that_need_mountpoint:
+            print(f"sudo mkdir -v {shlex.quote(str(expmt))}    #  {vol.name}")
+        print()
+    if vols_that_need_mount:
+        print("# need mount")
+        dump_table([["#", vol.name, expmt] for vol, expmt in vols_that_need_mount])
+        for vol, expmt in vols_that_need_mount:
+            print(f"sudo mount -v UUID={vol.uuid} {shlex.quote(str(expmt))}")
+        print()
+    if vols_that_need_mountpoint or vols_that_need_mount:
+        return []
+
+    return good_vols
+
+
+def get_volumes_on_usb_devices() -> list[BlockDevice]:
+    usbdevs = get_usb_devices()
+    candidates = list_block_devices(devices=[d.path for d in usbdevs])
+    vols = [bd for bd in candidates if is_volume(bd)]
+    return vols
+
+
+def get_usb_devices(
+    filter=FILTER_USB,
+    outputkeys=USB_DEVICES_OUTPUT_KEYS,
+) -> list[BlockDevice]:
+    return list_block_devices(outputkeys=outputkeys, filter=filter)
+
+
+def is_volume(bd: BlockDevice) -> bool:
+    if bd.fstype is not None:
+        return True
+    return False
+
+
+def ignore_volume(bd: BlockDevice, ignore_volume_filename: str) -> bool:
+    try:
+        if uuid.UUID(bd.parttype) in IGNORE_PARTTYPE_UUIDS:
+            return True
+    except ValueError:
+        pass
+
+    if bd.fstype in IGNORE_FSTYPES:
+        return True
+
+    try:
+        if (
+            bd.mountpoint
+            and (pathlib.Path(bd.mountpoint) / ignore_volume_filename).exists()
+        ):
+            return True
+    except PermissionError:
+        pass
+
+    return False
 
 
 LSBLK = "/usr/bin/lsblk"
@@ -612,8 +619,41 @@ class Config:
             setattr(self, n, v)
 
 
+FFOD_DB_NAME_USB = "usb"
+FFOD_DB_NAME_VOL = "vol"
+FFOD_DB_TABLES = {
+    FFOD_DB_NAME_USB: {
+        "firstseenutc": "TEXT",
+        "vendor": "TEXT",
+        "model": "TEXT",
+        "serial": "TEXT",
+    },
+    FFOD_DB_NAME_VOL: {
+        "label": "TEXT",
+        "uuid": "TEXT",
+    },
+}
+FFOD_DB_TABLE_FOREIGN_REFS = {
+    FFOD_DB_NAME_VOL: {
+        FFOD_DB_NAME_USB + "_id": FFOD_DB_NAME_USB,
+    },
+}
 FFOD_DB_SCHEMA = {
-    "vol": "CREATE TABLE vol (id INTEGER PRIMARY KEY, label TEXT, uuid TEXT)",
+    tablename: "CREATE TABLE "
+    + tablename
+    + " ("
+    + ", ".join(
+        ["id INTEGER PRIMARY KEY"]
+        + [colname + " " + coltype for colname, coltype in columns.items()]
+        + [
+            "FOREIGN KEY(" + refname + ") REFERENCES " + othertable + "(id)"
+            for refname, othertable in FFOD_DB_TABLE_FOREIGN_REFS.get(
+                tablename, {}
+            ).items()
+        ]
+    )
+    + ")"
+    for tablename, columns in FFOD_DB_TABLES.items()
 }
 
 
