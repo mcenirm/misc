@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import collections.abc
+import copy
 import dataclasses
 import difflib
 import functools
@@ -26,14 +28,32 @@ def main(cfgfile: pathlib.Path = None):
         cfg.toml_file = cfgfile
     cfg.load()
 
-    vols = get_volumes_on_usb_devices()
-    vols = [bd for bd in vols if not ignore_volume(bd, cfg.ignore_volume_filename)]
-    vols = ensure_volumes_are_ready(vols, cfg.mount_tree)
-    if not vols:
-        return
+    db = Database(dbfile=cfg.db_file)
 
-    con = sqlite3.connect(cfg.db_file)
-    ensure_db_schema(con)
+    usbdevs = get_usb_devices()
+    all_vols: dict[int, BlockDevice] = {}
+    for usbdev in usbdevs:
+        usbid = db.note_usb_device(usbdev)
+        candidates = list_block_devices(devices=[usbdev.path])
+
+        # Only look at volumes
+        vols = [bd for bd in candidates if is_volume(bd)]
+
+        # Only look at volumes that are relevant to us,
+        # and that do not have the "ignore" marker file
+        vols = [bd for bd in vols if not ignore_volume(bd, cfg.ignore_volume_filename)]
+
+        for vol in vols:
+            volid = db.note_volume(vol, usbid=usbid)
+            if volid in all_vols:
+                raise IndexError("volume ID collision", volid, all_vols[volid], vol)
+            all_vols[volid] = vol
+
+    ready_results = are_volumes_ready(all_vols, cfg.mount_tree)
+    show_actions_for_volume_ready(ready_results)
+
+    # TODO What do we do next?
+    pass
 
 
 IGNORE_PARTTYPE_UUIDS = {
@@ -307,71 +327,121 @@ class DataSize:
         return self.__class__.__name__ + "(" + repr(self.origval) + ")"
 
 
-def ensure_volumes_are_ready(
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class VolumeReadyCheckResult:
+    vol: BlockDevice
+    expected_mountpoint: pathlib.Path
+    actual_mountpoint: pathlib.Path | None
+    needs_remount: bool
+    bad_mountpoint: bool
+    missing_mountpoint: bool
+    pending_mount: bool
+
+    @property
+    def is_ready(self) -> bool:
+        return not (
+            self.needs_remount
+            or self.bad_mountpoint
+            or self.missing_mountpoint
+            or self.pending_mount
+        )
+
+    def __bool__(self) -> bool:
+        return self.is_ready
+
+
+def is_volume_ready(
+    vol: BlockDevice, mount_tree: pathlib.Path
+) -> VolumeReadyCheckResult:
+    expected_mountpoint = mount_tree / f"{vol.label},{vol.uuid}"
+    actual_mountpoint = pathlib.Path(vol.mountpoint) if vol.mountpoint else None
+    needs_remount = False
+    bad_mountpoint = False
+    missing_mountpoint = False
+    pending_mount = False
+
+    if not expected_mountpoint.is_dir(follow_symlinks=False):
+        if expected_mountpoint.exists():
+            bad_mountpoint = True
+        else:
+            missing_mountpoint = True
+    if actual_mountpoint and actual_mountpoint != expected_mountpoint:
+        needs_remount = True
+    elif not actual_mountpoint:
+        pending_mount = True
+
+    return VolumeReadyCheckResult(
+        vol=vol,
+        expected_mountpoint=expected_mountpoint,
+        actual_mountpoint=actual_mountpoint,
+        needs_remount=needs_remount,
+        bad_mountpoint=bad_mountpoint,
+        missing_mountpoint=missing_mountpoint,
+        pending_mount=pending_mount,
+    )
+
+
+def are_volumes_ready(
     vols: list[BlockDevice], mount_tree: pathlib.Path
-) -> list[BlockDevice]:
-    vols_that_need_remount: list[tuple[BlockDevice, pathlib.Path]] = []
-    vols_with_bad_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
-    vols_that_need_mountpoint: list[tuple[BlockDevice, pathlib.Path]] = []
-    vols_that_need_mount: list[tuple[BlockDevice, pathlib.Path]] = []
-    good_vols: list[BlockDevice] = []
-    for vol in vols:
-        allgood = True
-        expected_mountpoint = mount_tree / f"{vol.label},{vol.uuid}"
-        actual_mountpoint = pathlib.Path(vol.mountpoint) if vol.mountpoint else None
-        if not expected_mountpoint.is_dir(follow_symlinks=False):
-            allgood = False
-            if expected_mountpoint.exists():
-                vols_with_bad_mountpoint.append((vol, expected_mountpoint))
-            else:
-                vols_that_need_mountpoint.append((vol, expected_mountpoint))
-        if actual_mountpoint and actual_mountpoint != expected_mountpoint:
-            allgood = False
-            vols_that_need_remount.append((vol, expected_mountpoint))
-        elif not actual_mountpoint:
-            allgood = False
-            vols_that_need_mount.append((vol, expected_mountpoint))
-        if allgood:
-            good_vols.append(vol)
+) -> list[VolumeReadyCheckResult]:
+    return [is_volume_ready(vol, mount_tree) for vol in vols]
 
-    dump_table([[vol.name, vol.fstype, vol.mountpoint] for vol in good_vols])
 
+def show_actions_for_volume_ready(
+    results: list[VolumeReadyCheckResult], print=print
+) -> None:
+    dump_table(
+        [
+            [vol.name, vol.fstype, vol.mountpoint]
+            for vol in [res.vol for res in results]
+        ],
+        print=print,
+    )
+
+    vols_with_bad_mountpoint = [res for res in results if res.bad_mountpoint]
     if vols_with_bad_mountpoint:
         print("!!!! FIX MOUNTPOINT (should be directory) !!!!")
-        dump_table([[vol.name, expmt] for vol, expmt in vols_with_bad_mountpoint])
-        return []
+        dump_table(
+            [
+                [res.vol.name, res.expected_mountpoint]
+                for res in vols_with_bad_mountpoint
+            ],
+            print=print,
+        )
+    vols_that_need_remount = [res for res in results if res.needs_remount]
     if vols_that_need_remount:
         print("!!!! UNMOUNT AND REMOUNT !!!!")
         dump_table(
             [
-                [vol.name, vol.mountpoint, expmt]
-                for vol, expmt in vols_with_bad_mountpoint
-            ]
+                [res.vol.name, res.vol.mountpoint, res.expected_mountpoint]
+                for res in vols_that_need_remount
+            ],
+            print=print,
         )
-        return []
-    if vols_that_need_mountpoint:
+    vols_with_missing_mountpoint = [res for res in results if res.missing_mountpoint]
+    if vols_with_missing_mountpoint:
         print("# need mountpoint")
-        dump_table([["#", vol.name, expmt] for vol, expmt in vols_that_need_mountpoint])
-        for vol, expmt in vols_that_need_mountpoint:
+        dump_table(
+            [
+                ["#", res.vol.name, res.expected_mountpoint]
+                for res in vols_with_missing_mountpoint
+            ],
+            print=print,
+        )
+        for vol, expmt in vols_with_missing_mountpoint:
             print(f"sudo mkdir -v {shlex.quote(str(expmt))}    #  {vol.name}")
         print()
+    vols_that_need_mount = [res for res in results if res.pending_mount]
     if vols_that_need_mount:
         print("# need mount")
-        dump_table([["#", vol.name, expmt] for vol, expmt in vols_that_need_mount])
-        for vol, expmt in vols_that_need_mount:
-            print(f"sudo mount -v UUID={vol.uuid} {shlex.quote(str(expmt))}")
+        dump_table(
+            [["#", vol.name, expmt] for vol, expmt in vols_that_need_mount], print=print
+        )
+        for res in vols_that_need_mount:
+            print(
+                f"sudo mount -v UUID={res.vol.uuid} {shlex.quote(str(res.expected_mountpoint))}"
+            )
         print()
-    if vols_that_need_mountpoint or vols_that_need_mount:
-        return []
-
-    return good_vols
-
-
-def get_volumes_on_usb_devices() -> list[BlockDevice]:
-    usbdevs = get_usb_devices()
-    candidates = list_block_devices(devices=[d.path for d in usbdevs])
-    vols = [bd for bd in candidates if is_volume(bd)]
-    return vols
 
 
 def get_usb_devices(
@@ -621,17 +691,26 @@ class Config:
 
 FFOD_DB_NAME_USB = "usb"
 FFOD_DB_NAME_VOL = "vol"
+FFOD_DB_NAME_FIRSTSEENUTC = "firstseenutc"
+FFOD_DB_NAME_VENDOR = "vendor"
+FFOD_DB_NAME_MODEL = "model"
+FFOD_DB_NAME_SERIAL = "serial"
 FFOD_DB_TABLES = {
     FFOD_DB_NAME_USB: {
-        "firstseenutc": "TEXT",
-        "vendor": "TEXT",
-        "model": "TEXT",
-        "serial": "TEXT",
+        FFOD_DB_NAME_FIRSTSEENUTC: "TEXT DEFAULT CURRENT_TIMESTAMP",
+        FFOD_DB_NAME_VENDOR: "TEXT",
+        FFOD_DB_NAME_MODEL: "TEXT",
+        FFOD_DB_NAME_SERIAL: "TEXT",
     },
     FFOD_DB_NAME_VOL: {
         "label": "TEXT",
         "uuid": "TEXT",
     },
+}
+FFOD_DB_TABLE_UNIQUES = {
+    FFOD_DB_NAME_USB: [
+        [FFOD_DB_NAME_VENDOR, FFOD_DB_NAME_SERIAL],
+    ],
 }
 FFOD_DB_TABLE_FOREIGN_REFS = {
     FFOD_DB_NAME_VOL: {
@@ -646,6 +725,10 @@ FFOD_DB_SCHEMA = {
         ["id INTEGER PRIMARY KEY"]
         + [colname + " " + coltype for colname, coltype in columns.items()]
         + [
+            "UNIQUE(" + ", ".join(colnames) + ")"
+            for colnames in FFOD_DB_TABLE_UNIQUES.get(tablename, [])
+        ]
+        + [
             "FOREIGN KEY(" + refname + ") REFERENCES " + othertable + "(id)"
             for refname, othertable in FFOD_DB_TABLE_FOREIGN_REFS.get(
                 tablename, {}
@@ -655,37 +738,113 @@ FFOD_DB_SCHEMA = {
     + ")"
     for tablename, columns in FFOD_DB_TABLES.items()
 }
+FFOD_DB_FIND_SQLS = {
+    tablename: [
+        "SELECT * FROM "
+        + tablename
+        + " WHERE "
+        + " AND ".join([colname + " = :" + colname for colname in colnames])
+        for colnames in FFOD_DB_TABLE_UNIQUES.get(tablename, [])
+    ]
+    for tablename in FFOD_DB_TABLES.keys()
+}
 
 
-def ensure_db_schema(
-    con: sqlite3.Connection, expected_schema: dict[str, str] = FFOD_DB_SCHEMA
-):
-    cur = con.cursor()
-    try:
-        cur.execute("SELECT type, name, sql FROM sqlite_schema")
-        print("----")
-        actual_schema: dict[str, str] = {}
-        for ddltype, ddlname, ddlsql in cur.fetchall():
-            print(ddltype, ddlname, ddlsql)
-            actual_schema[ddlname] = ddlsql
-        print("----")
-        for expname, expsql in expected_schema.items():
-            if expname not in actual_schema:
-                print("missing:", expname, expsql)
-                cur.execute(expsql)
-            elif expsql != actual_schema[expname]:
-                print("mismatch:", expname)
-                for opcode, a0, a1, b0, b1 in difflib.SequenceMatcher(
-                    None, expsql, actual_schema[expname]
-                ).get_opcodes():
-                    print("-", opcode, a0, a1, b0, b1)
-        print("----")
-        for actname, actsql in actual_schema.items():
-            if actname not in expected_schema:
-                print("extra:", actname, actsql)
-        print("----")
-    finally:
-        cur.close()
+class Database:
+    def __init__(
+        self,
+        dbfile: pathlib.Path,
+        schemadef: dict[str, str] = FFOD_DB_SCHEMA,
+    ):
+        self.dbfile = pathlib.Path(dbfile)
+        self.schemadef = copy.copy(schemadef)
+        self.con = sqlite3.connect(self.dbfile)
+        self.ensure_schema()
+
+    def _execute(
+        self,
+        cur: sqlite3.Cursor,
+        sql: str,
+        parameters: collections.abc.Sequence | collections.abc.Mapping = (),
+    ) -> sqlite3.Cursor:
+        prefix = "--"
+        print(prefix, sql)
+        if "items" in dir(parameters):
+            for k, v in parameters.items():
+                print(prefix, prefix, k, repr(v))
+        else:
+            for v in parameters:
+                print(prefix, prefix, repr(v))
+        if parameters:
+            print(prefix, prefix)
+        return cur.execute(sql, parameters)
+
+    def ensure_schema(self):
+        cur = self.con.cursor()
+        try:
+            self._execute(cur, "SELECT type, name, sql FROM sqlite_schema")
+            print("----")
+            actual_schema: dict[str, str] = {}
+            for ddltype, ddlname, ddlsql in cur.fetchall():
+                print(ddltype, ddlname, ddlsql)
+                actual_schema[ddlname] = ddlsql
+            print("----")
+            for expname, expsql in self.schemadef.items():
+                if expname not in actual_schema:
+                    print("missing:", expname, expsql)
+                    self._execute(cur, expsql)
+                elif expsql != actual_schema[expname]:
+                    print("mismatch:", expname)
+                    for opcode, a0, a1, b0, b1 in difflib.SequenceMatcher(
+                        None, expsql, actual_schema[expname]
+                    ).get_opcodes():
+                        print("-", opcode, a0, a1, b0, b1)
+            print("----")
+            for actname, actsql in actual_schema.items():
+                if actname not in self.schemadef:
+                    print("extra:", actname, actsql)
+            print("----")
+        finally:
+            cur.close()
+
+    def note_usb_device(self, usbdev: BlockDevice) -> int:
+        cur = self.con.cursor()
+        try:
+            data = {
+                colname: val
+                for colname, val in [
+                    (FFOD_DB_NAME_VENDOR, usbdev.vendor),
+                    (FFOD_DB_NAME_MODEL, usbdev.model),
+                    (FFOD_DB_NAME_SERIAL, usbdev.serial),
+                ]
+                if val
+            }
+            found = []
+            for find_sql in FFOD_DB_FIND_SQLS.get(FFOD_DB_NAME_USB, []):
+                found.extend(self._execute(cur, find_sql, data).fetchall())
+            if found:
+                raise NotImplementedError("what to do if found?", found)
+
+            insert_colnames = list(data.keys())
+            insert_sql = (
+                "INSERT INTO "
+                + FFOD_DB_NAME_USB
+                + "("
+                + ", ".join(insert_colnames)
+                + ") VALUES("
+                + ", ".join([":" + n for n in insert_colnames])
+                + ") RETURNING *"
+            )
+            self._execute(cur, insert_sql, data)
+            for x in cur.fetchall():
+                print("**", x)
+            self.con.commit()
+        finally:
+            cur.close()
+        raise SystemExit
+
+    def note_volume(self, vol: BlockDevice) -> int:
+        raise NotImplementedError
 
 
 if __name__ == "__main__":
