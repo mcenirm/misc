@@ -49,11 +49,10 @@ def main(cfgfile: pathlib.Path = None):
                 raise IndexError("volume ID collision", volid, all_vols[volid], vol)
             all_vols[volid] = vol
 
-    ready_results = are_volumes_ready(all_vols, cfg.mount_tree)
+    ready_results = are_volumes_ready(all_vols.values(), cfg.mount_tree)
     show_actions_for_volume_ready(ready_results)
 
-    # TODO What do we do next?
-    pass
+    raise NotImplementedError("what to do after seeing if volumes are ready?")
 
 
 IGNORE_PARTTYPE_UUIDS = {
@@ -74,7 +73,26 @@ IGNORE_FSTYPES = {
 METADATA_HOLDER = "holder"
 METADATA_KEY = "key"
 METADATA_DESC = "desc"
-LSBLK_KNOWN_PLURALS = {"FSROOTS", "MOUNTPOINTS"}
+LSBLK_KNOWN_PLURALS = {
+    "FSROOTS",
+    "MOUNTPOINTS",
+}
+LSBLK_KNOWN_UNSTABLES = {
+    "DISK_SEQ",
+    "FSAVAIL",
+    "FSROOTS",
+    "FSSIZE",
+    "FSUSE_PCT",
+    "FSUSED",
+    "HCTL",
+    "KNAME",
+    "MAJ_MIN",
+    "MIN",
+    "MOUNTPOINT",
+    "MOUNTPOINTS",
+    "NAME",
+    "PATH",
+}
 
 
 def _regenerate_block_device_class_from_lsblk():
@@ -284,11 +302,31 @@ BLOCKDEVICE_NAME_TO_KEY: dict[str, str] = {
 BLOCKDEVICE_KEY_TO_NAME: dict[str, str] = {
     f.metadata[METADATA_KEY]: f.name for f in dataclasses.fields(BlockDevice)
 }
+
+FFOD_DB_NAME_USB = "usb"
+FFOD_DB_NAME_VOL = "vol"
+FFOD_DB_NAME_FIRSTSEENUTC = "firstseenutc"
+FFOD_DB_NAME_VENDOR = "vendor"
+FFOD_DB_NAME_MODEL = "model"
+FFOD_DB_NAME_SERIAL = "serial"
+FFOD_DB_NAME_SIZE = "size"
+FFOD_DB_NAME_LABEL = "label"
+FFOD_DB_NAME_UUID = "uuid"
+
 FILTER_USB, FILTER_NOT_USB = (
     f'{BLOCKDEVICE_NAME_TO_KEY["tran"]} {op} "usb"' for op in ["eq", "ne"]
 )
 USB_DEVICES_OUTPUT_KEYS = [
-    BLOCKDEVICE_NAME_TO_KEY[n] for n in ["tran", "path", "vendor", "model", "serial"]
+    BLOCKDEVICE_NAME_TO_KEY[n]
+    for n in [
+        "tran",
+        "path",
+        FFOD_DB_NAME_VENDOR,
+        FFOD_DB_NAME_MODEL,
+        FFOD_DB_NAME_VENDOR,
+        FFOD_DB_NAME_SERIAL,
+        FFOD_DB_NAME_SIZE,
+    ]
 ]
 
 IEC_MULTIPLIERS = {
@@ -435,7 +473,11 @@ def show_actions_for_volume_ready(
     if vols_that_need_mount:
         print("# need mount")
         dump_table(
-            [["#", vol.name, expmt] for vol, expmt in vols_that_need_mount], print=print
+            [
+                ["#", res.vol.name, res.expected_mountpoint]
+                for res in vols_that_need_mount
+            ],
+            print=print,
         )
         for res in vols_that_need_mount:
             print(
@@ -689,50 +731,56 @@ class Config:
             setattr(self, n, v)
 
 
-FFOD_DB_NAME_USB = "usb"
-FFOD_DB_NAME_VOL = "vol"
-FFOD_DB_NAME_FIRSTSEENUTC = "firstseenutc"
-FFOD_DB_NAME_VENDOR = "vendor"
-FFOD_DB_NAME_MODEL = "model"
-FFOD_DB_NAME_SERIAL = "serial"
+def _id_for_table(tablename: str) -> str:
+    return "id"
+
+
+def _refid_for_table(tablename: str, qualifier: str = None) -> str:
+    if qualifier:
+        raise NotImplementedError("what to do with a qualifier?", tablename, qualifier)
+    return tablename + "_" + _id_for_table(tablename)
+
+
+def _reference_other_tables(referred_tables: list[str]) -> dict[str, str]:
+    return {
+        _refid_for_table(n): "INTEGER REFERENCES " + n + "(" + _id_for_table(n) + ")"
+        for n in referred_tables
+    }
+
+
 FFOD_DB_TABLES = {
     FFOD_DB_NAME_USB: {
         FFOD_DB_NAME_FIRSTSEENUTC: "TEXT DEFAULT CURRENT_TIMESTAMP",
         FFOD_DB_NAME_VENDOR: "TEXT",
         FFOD_DB_NAME_MODEL: "TEXT",
         FFOD_DB_NAME_SERIAL: "TEXT",
+        FFOD_DB_NAME_SIZE: "INTEGER",
     },
     FFOD_DB_NAME_VOL: {
-        "label": "TEXT",
-        "uuid": "TEXT",
-    },
+        FFOD_DB_NAME_LABEL: "TEXT",
+        FFOD_DB_NAME_UUID: "TEXT",
+        FFOD_DB_NAME_SIZE: "INTEGER",
+    }
+    | _reference_other_tables([FFOD_DB_NAME_USB]),
 }
 FFOD_DB_TABLE_UNIQUES = {
     FFOD_DB_NAME_USB: [
         [FFOD_DB_NAME_VENDOR, FFOD_DB_NAME_SERIAL],
     ],
-}
-FFOD_DB_TABLE_FOREIGN_REFS = {
-    FFOD_DB_NAME_VOL: {
-        FFOD_DB_NAME_USB + "_id": FFOD_DB_NAME_USB,
-    },
+    FFOD_DB_NAME_VOL: [
+        [FFOD_DB_NAME_LABEL, FFOD_DB_NAME_UUID],
+    ],
 }
 FFOD_DB_SCHEMA = {
     tablename: "CREATE TABLE "
     + tablename
     + " ("
     + ", ".join(
-        ["id INTEGER PRIMARY KEY"]
+        [_id_for_table(tablename) + " INTEGER PRIMARY KEY"]
         + [colname + " " + coltype for colname, coltype in columns.items()]
         + [
             "UNIQUE(" + ", ".join(colnames) + ")"
             for colnames in FFOD_DB_TABLE_UNIQUES.get(tablename, [])
-        ]
-        + [
-            "FOREIGN KEY(" + refname + ") REFERENCES " + othertable + "(id)"
-            for refname, othertable in FFOD_DB_TABLE_FOREIGN_REFS.get(
-                tablename, {}
-            ).items()
         ]
     )
     + ")"
@@ -759,6 +807,7 @@ class Database:
         self.dbfile = pathlib.Path(dbfile)
         self.schemadef = copy.copy(schemadef)
         self.con = sqlite3.connect(self.dbfile)
+        self.con.row_factory = sqlite3.Row
         self.ensure_schema()
 
     def _execute(
@@ -779,72 +828,154 @@ class Database:
             print(prefix, prefix)
         return cur.execute(sql, parameters)
 
+    def _fetchall(self, cur: sqlite3.Cursor) -> list[dict[str, object]]:
+        return [dict(row) for row in cur.fetchall()]
+
+    def _find_one(
+        self, cur: sqlite3.Cursor, tablename: str, data: dict[str, object]
+    ) -> int | None:
+        found = []
+        for find_sql in FFOD_DB_FIND_SQLS.get(tablename, []):
+            self._execute(cur, find_sql, data)
+            found.extend(self._fetchall(cur))
+        if found:
+            if len(found) == 1:
+                return found[0][_id_for_table(tablename)]
+            raise NotImplementedError("what to do if multiple found?", tablename, found)
+        return None
+
+    def _insert_one(
+        self, cur: sqlite3.Cursor, tablename: str, data: dict[str, object]
+    ) -> dict[str, object]:
+        insert_colnames = list(data.keys())
+        insert_sql = (
+            "INSERT INTO "
+            + tablename
+            + "("
+            + ", ".join(insert_colnames)
+            + ") VALUES("
+            + ", ".join([":" + n for n in insert_colnames])
+            + ") RETURNING *"
+        )
+        self._execute(cur, insert_sql, data)
+        inserted = self._fetchall(cur)
+        if inserted:
+            if len(inserted) == 1:
+                return inserted[0]
+            raise NotImplementedError(
+                "what to do if multiple inserted?", tablename, inserted
+            )
+        raise NotImplementedError(
+            "what to do if nothing inserted?", tablename, inserted
+        )
+
+    def _find_or_insert_one(self, tablename: str, data: dict[str, object]) -> int:
+        cur = self.con.cursor()
+        try:
+            found_id = self._find_one(cur, tablename, data)
+            if found_id is not None:
+                return found_id
+            inserted = self._insert_one(cur, tablename, data)
+            self.con.commit()
+            return inserted[_id_for_table(tablename)]
+        finally:
+            cur.close()
+
     def ensure_schema(self):
         cur = self.con.cursor()
         try:
+            existing_schema: dict[str, str] = {}
             self._execute(cur, "SELECT type, name, sql FROM sqlite_schema")
-            print("----")
-            actual_schema: dict[str, str] = {}
-            for ddltype, ddlname, ddlsql in cur.fetchall():
-                print(ddltype, ddlname, ddlsql)
-                actual_schema[ddlname] = ddlsql
-            print("----")
-            for expname, expsql in self.schemadef.items():
-                if expname not in actual_schema:
-                    print("missing:", expname, expsql)
-                    self._execute(cur, expsql)
-                elif expsql != actual_schema[expname]:
-                    print("mismatch:", expname)
-                    for opcode, a0, a1, b0, b1 in difflib.SequenceMatcher(
-                        None, expsql, actual_schema[expname]
-                    ).get_opcodes():
-                        print("-", opcode, a0, a1, b0, b1)
-            print("----")
-            for actname, actsql in actual_schema.items():
-                if actname not in self.schemadef:
-                    print("extra:", actname, actsql)
-            print("----")
+            for t, n, s in cur.fetchall():
+                if t == "index" and s is None:
+                    continue
+                if t == "table" and s is not None:
+                    pass
+                else:
+                    raise NotImplementedError(
+                        "unhandled DDL for existing schema", t.upper(), n, s
+                    )
+                existing_schema[n] = s
+
+            missing = []
+            mismatch = []
+            for expected_name, expected_sql in self.schemadef.items():
+                if expected_name not in existing_schema:
+                    missing.append((expected_name, expected_sql))
+                else:
+                    existing_sql = existing_schema[expected_name]
+                    if expected_sql != existing_sql:
+                        mismatch.append((expected_name, expected_sql, existing_sql))
+
+            extra = []
+            for existing_name, existing_sql in existing_schema.items():
+                if existing_name not in self.schemadef:
+                    extra.append((existing_name, existing_sql))
+
+            created = []
+            for expected_name, expected_sql in missing:
+                self._execute(cur, expected_sql)
+                created.append((expected_name, expected_sql))
+
         finally:
             cur.close()
+
+        if existing_schema:
+            print("---- Existing schema")
+            for existing_sql in existing_schema.values():
+                print(existing_sql)
+
+        if created:
+            print("---- Created")
+            for _, created_sql in missing:
+                print(created_sql)
+
+        if mismatch:
+            print("---- Mismatched")
+            # TODO use an actionable presentation
+            for expected_name, expected_sql, existing_sql in mismatch:
+                print("mismatch:", expected_name)
+                print("expected:", expected_sql)
+                print("existing:", existing_sql)
+                for opcode, a0, a1, b0, b1 in difflib.SequenceMatcher(
+                    None, expected_sql, existing_sql
+                ).get_opcodes():
+                    print("-", opcode, a0, a1, b0, b1)
+                print()
+
+        if extra:
+            for _, existing_sql in extra:
+                print("---- Extra")
+                print(existing_sql)
+
+        if existing_schema or created or mismatch or extra:
+            print("----")
 
     def note_usb_device(self, usbdev: BlockDevice) -> int:
-        cur = self.con.cursor()
-        try:
-            data = {
-                colname: val
-                for colname, val in [
-                    (FFOD_DB_NAME_VENDOR, usbdev.vendor),
-                    (FFOD_DB_NAME_MODEL, usbdev.model),
-                    (FFOD_DB_NAME_SERIAL, usbdev.serial),
-                ]
-                if val
-            }
-            found = []
-            for find_sql in FFOD_DB_FIND_SQLS.get(FFOD_DB_NAME_USB, []):
-                found.extend(self._execute(cur, find_sql, data).fetchall())
-            if found:
-                raise NotImplementedError("what to do if found?", found)
+        data = {
+            colname: val
+            for colname, val in [
+                (FFOD_DB_NAME_VENDOR, usbdev.vendor),
+                (FFOD_DB_NAME_MODEL, usbdev.model),
+                (FFOD_DB_NAME_SERIAL, usbdev.serial),
+                (FFOD_DB_NAME_SIZE, usbdev.size.sizebytes),
+            ]
+            if val
+        }
+        return self._find_or_insert_one(FFOD_DB_NAME_USB, data)
 
-            insert_colnames = list(data.keys())
-            insert_sql = (
-                "INSERT INTO "
-                + FFOD_DB_NAME_USB
-                + "("
-                + ", ".join(insert_colnames)
-                + ") VALUES("
-                + ", ".join([":" + n for n in insert_colnames])
-                + ") RETURNING *"
-            )
-            self._execute(cur, insert_sql, data)
-            for x in cur.fetchall():
-                print("**", x)
-            self.con.commit()
-        finally:
-            cur.close()
-        raise SystemExit
-
-    def note_volume(self, vol: BlockDevice) -> int:
-        raise NotImplementedError
+    def note_volume(self, vol: BlockDevice, usbid: int) -> int:
+        data = {
+            colname: val
+            for colname, val in [
+                (FFOD_DB_NAME_LABEL, vol.label),
+                (FFOD_DB_NAME_UUID, vol.uuid),
+                (FFOD_DB_NAME_SIZE, vol.size.sizebytes),
+                (_refid_for_table(FFOD_DB_NAME_USB), usbid),
+            ]
+            if val
+        }
+        return self._find_or_insert_one(FFOD_DB_NAME_VOL, data)
 
 
 if __name__ == "__main__":
