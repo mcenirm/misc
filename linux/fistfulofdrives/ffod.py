@@ -426,63 +426,116 @@ def are_volumes_ready(
 
 
 def show_actions_for_volume_ready(
-    results: list[VolumeReadyCheckResult], print=print
+    results: list[VolumeReadyCheckResult],
+    print=print,
 ) -> None:
     dump_table(
         [
-            [vol.name, vol.fstype, vol.mountpoint]
+            ["#", vol.name, vol.fstype, vol.mountpoint]
             for vol in [res.vol for res in results]
         ],
         print=print,
     )
+    print()
 
     vols_with_bad_mountpoint = [res for res in results if res.bad_mountpoint]
     if vols_with_bad_mountpoint:
         print("!!!! FIX MOUNTPOINT (should be directory) !!!!")
         dump_table(
             [
-                [res.vol.name, res.expected_mountpoint]
+                ["#", res.vol.name, res.vol.label, res.expected_mountpoint]
                 for res in vols_with_bad_mountpoint
             ],
             print=print,
         )
-    vols_that_need_remount = [res for res in results if res.needs_remount]
-    if vols_that_need_remount:
-        print("!!!! UNMOUNT AND REMOUNT !!!!")
         dump_table(
             [
-                [res.vol.name, res.vol.mountpoint, res.expected_mountpoint]
+                [
+                    f"ls -ldGg -- {shlex.quote(str(res.expected_mountpoint))}",
+                    " #",
+                    res.vol.name,
+                    res.vol.label,
+                ]
+                for res in vols_with_bad_mountpoint
+            ],
+            print=print,
+        )
+        print()
+    vols_that_need_remount = [res for res in results if res.needs_remount]
+    if vols_that_need_remount:
+        print("!!!! UNMOUNT !!!!")
+        dump_table(
+            [
+                [
+                    "#",
+                    res.vol.name,
+                    res.vol.label,
+                    res.vol.mountpoint,
+                    res.expected_mountpoint,
+                ]
                 for res in vols_that_need_remount
             ],
             print=print,
         )
+        dump_table(
+            [
+                [
+                    f"sudo umount -v {shlex.quote(str(res.vol.mountpoint))}",
+                    " #",
+                    res.vol.name,
+                    res.vol.label,
+                ]
+                for res in vols_that_need_remount
+            ],
+            print=print,
+        )
+        print()
     vols_with_missing_mountpoint = [res for res in results if res.missing_mountpoint]
     if vols_with_missing_mountpoint:
         print("# need mountpoint")
         dump_table(
             [
-                ["#", res.vol.name, res.expected_mountpoint]
+                ["#", res.vol.name, res.vol.label, res.expected_mountpoint]
                 for res in vols_with_missing_mountpoint
             ],
             print=print,
         )
-        for vol, expmt in vols_with_missing_mountpoint:
-            print(f"sudo mkdir -v {shlex.quote(str(expmt))}    #  {vol.name}")
+        dump_table(
+            [
+                [
+                    f"sudo mkdir -v -- {shlex.quote(str(res.expected_mountpoint))}",
+                    " #",
+                    res.vol.name,
+                    res.vol.label,
+                ]
+                for res in vols_with_missing_mountpoint
+            ],
+            print=print,
+        )
         print()
     vols_that_need_mount = [res for res in results if res.pending_mount]
     if vols_that_need_mount:
         print("# need mount")
         dump_table(
             [
-                ["#", res.vol.name, res.expected_mountpoint]
+                ["#", res.vol.name, res.vol.label, res.expected_mountpoint]
                 for res in vols_that_need_mount
             ],
             print=print,
         )
-        for res in vols_that_need_mount:
-            print(
-                f"sudo mount -v UUID={res.vol.uuid} {shlex.quote(str(res.expected_mountpoint))}"
-            )
+        dump_table(
+            [
+                [
+                    f"sudo mount -v UUID={res.vol.uuid}",
+                    shlex.quote(str(res.expected_mountpoint)),
+                    " #",
+                    res.vol.name,
+                    res.vol.label,
+                ]
+                for res in vols_that_need_mount
+            ],
+            print=print,
+        )
         print()
 
 
