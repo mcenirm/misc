@@ -189,15 +189,26 @@ class LogEntry:
     line: str
     extralines: list[str]
     dt: datetime.datetime
+    dtgap: datetime.timedelta
     lvl: str
     src: str
     msg: str
     pkgs: set[str]
 
     def debug(self) -> list[str]:
-        return ["  ".join(map(str, [self.lineno, self.dt, self.lvl, self.src]))] + [
-            ": " + s for s in [self.msg] + self.extralines
-        ]
+        return [
+            "  ".join(
+                map(
+                    str,
+                    [
+                        str(self.lineno).rjust(7),
+                        self.lvl,
+                        self.src,
+                        f"{self.dt} ({self.dtgap if self.dtgap < datetime.timedelta.max else 'n/a'})",
+                    ],
+                )
+            )
+        ] + [": " + s for s in [self.msg] + self.extralines]
 
     def print(self, print=print) -> None:
         for dbg in self.debug():
@@ -208,6 +219,7 @@ def coalesce_entries(
     lines: typing.Iterable[str],
 ) -> typing.Generator[LogEntry, None, None]:
     nextentry: LogEntry | None = None
+    prevdt: datetime.datetime | None = None
     for lineno, line in enumerate(lines, 1):
         mtch = LOG_LINE1_PAT.fullmatch(line)
         if mtch:
@@ -216,11 +228,17 @@ def coalesce_entries(
                 nextentry = None
             dt, lvl, src, msg = mtch.groups()
             dt = datetime.datetime.strptime(dt, r"%Y-%m-%d %H:%M:%S")
+            if isinstance(prevdt, datetime.datetime):
+                dtgap = dt - prevdt
+            else:
+                dtgap = datetime.timedelta.max
+            prevdt = dt
             nextentry = LogEntry(
                 lineno=lineno,
                 line=line,
                 extralines=[],
                 dt=dt,
+                dtgap=dtgap,
                 lvl=lvl,
                 src=src,
                 msg=msg,
@@ -322,8 +340,10 @@ def main():
         else:
             print()
             e.print()
-            raise SystemExit
+            break
     print()
+    print("count of log entries: ", len(entries))
+    print("size of time range:   ", entries[-1].dt - entries[0].dt)
 
 
 if __name__ == "__main__":
