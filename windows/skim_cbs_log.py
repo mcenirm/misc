@@ -155,7 +155,7 @@ CBS_STARTING_TRUSTED_INSTALLER_INITIALIZATION = (
 )
 CBS_LOCK = "Lock: "
 CBS_LOCK_NEW_LOCK_ADDED = re.compile(
-    r"New lock added: (?P<cls>\w+), level: (?P<level>\d+), total lock:(?P<total_lock>\d+)"
+    r"New lock added: ((?P<cls>\w+)|(?P<clsmthd>\w+:\w+)), level: (?P<level>\d+), total lock:(?P<total_lock>\d+)"
 )
 CBS_ENDING_TRUSTED_INSTALLER_INITIALIZATION = "Ending TrustedInstaller initialization."
 CBS_STARTING_THE_TRUSTED_INSTALLER_MAIN_LOOP = (
@@ -180,6 +180,15 @@ CBS_TIWORKER_STARTS_SUCCESSFULLY = "TiWorker starts successfully."
 CBS_UNIVERSAL_TIME_IS = "Universal Time is:"
 CBS_LOADED_SERVICING_STACK_WITH_CORE = re.compile(
     r"Loaded Servicing Stack (?P<stack_version>v\d[0-9.]+\d) with Core: (?P<cbscore_dll>[-A-Z:\\a-z0-9_.]+)"
+)
+CBS_COULD_NOT_LOAD_SRCLIENT_DLL_FROM_PATH_SRCLIENT_DLL_CONTINUING_WITHOUT_SYSTEM_RESTORE_POINTS = "Could not load SrClient DLL from path: SrClient.dll.  Continuing without system restore points."
+CBS_NONSTART_SET_PENDING_STORE_CONSISTENCY_CHECK = (
+    "NonStart: Set pending store consistency check."
+)
+
+CSI = "CSI"
+CSI_WCPINITIALIZE_CALLED = re.compile(
+    r"\d+@\d+/\d+/\d+:\d+:\d+:\d+\.\d+ WcpInitialize \(wcp\.dll version \d+\.\d+\.\d+\.\d+\) called \(stack( @0x[0-9a-f]+)+\)"
 )
 
 
@@ -259,51 +268,63 @@ def coalesce_entries(
 def should_ignore(entry: LogEntry) -> bool:
     if should_ignore_cbs(entry):
         return True
+    if should_ignore_csi(entry):
+        return True
     return False
 
 
 def should_ignore_cbs(entry: LogEntry) -> bool:
-    if entry.msg in {
-        CBS_STARTING_TRUSTED_INSTALLER_INITIALIZATION,
-        CBS_ENDING_TRUSTED_INSTALLER_INITIALIZATION,
-        CBS_STARTING_THE_TRUSTED_INSTALLER_MAIN_LOOP,
-        CBS_TRUSTED_INSTALLER_SERVICE_STARTS_SUCCESSFULLY,
-        CBS_NO_STARTUP_PROCESSING_REQUIRED_TRUSTED_INSTALLER_SERVICE_WAS_NOT_SET_AS_AUTOSTART,
-        CBS_STARTUP_PROCESSING_THREAD_TERMINATED_NORMALLY,
-        CBS_STARTING_TIWORKER_INITIALIZATION,
-        CBS_ENDING_TIWORKER_INITIALIZATION,
-        CBS_STARTING_THE_TIWORKER_MAIN_LOOP,
-        CBS_TIWORKER_STARTS_SUCCESSFULLY,
-    }:
-        return True
-    if entry.msg.startswith(CBS_UNIVERSAL_TIME_IS):
-        return True
-    if CBS_LOADED_SERVICING_STACK_WITH_CORE.fullmatch(entry.msg):
-        return True
-    if should_ignore_cbs_ti(entry):
-        return True
-    if should_ignore_cbs_lock(entry):
-        return True
+    if entry.src == CBS:
+        if entry.msg in {
+            CBS_STARTING_TRUSTED_INSTALLER_INITIALIZATION,
+            CBS_ENDING_TRUSTED_INSTALLER_INITIALIZATION,
+            CBS_STARTING_THE_TRUSTED_INSTALLER_MAIN_LOOP,
+            CBS_TRUSTED_INSTALLER_SERVICE_STARTS_SUCCESSFULLY,
+            CBS_NO_STARTUP_PROCESSING_REQUIRED_TRUSTED_INSTALLER_SERVICE_WAS_NOT_SET_AS_AUTOSTART,
+            CBS_STARTUP_PROCESSING_THREAD_TERMINATED_NORMALLY,
+            CBS_STARTING_TIWORKER_INITIALIZATION,
+            CBS_ENDING_TIWORKER_INITIALIZATION,
+            CBS_STARTING_THE_TIWORKER_MAIN_LOOP,
+            CBS_TIWORKER_STARTS_SUCCESSFULLY,
+            CBS_COULD_NOT_LOAD_SRCLIENT_DLL_FROM_PATH_SRCLIENT_DLL_CONTINUING_WITHOUT_SYSTEM_RESTORE_POINTS,
+            CBS_NONSTART_SET_PENDING_STORE_CONSISTENCY_CHECK,
+        }:
+            return True
+        if entry.msg.startswith(CBS_UNIVERSAL_TIME_IS):
+            return True
+        if CBS_LOADED_SERVICING_STACK_WITH_CORE.fullmatch(entry.msg):
+            return True
+        if should_ignore_cbs_ti(entry):
+            return True
+        if should_ignore_cbs_lock(entry):
+            return True
     return False
 
 
 def should_ignore_cbs_ti(entry: LogEntry) -> bool:
     if entry.msg.startswith(CBS_TI):
-        rest = entry.msg.removeprefix(CBS_TI)
-        if rest in {
+        submsg = entry.msg.removeprefix(CBS_TI)
+        if submsg in {
             CBS_TI_INITIALIZING_TRUSTED_INSTALLER,
             CBS_TI_STARTUP_PROCESSING_COMPLETES_RELEASE_STARTUP_PROCESSING_LOCK,
         }:
             return True
-        if rest.startswith(CBS_TI_LAST_BOOT_TIME):
+        if submsg.startswith(CBS_TI_LAST_BOOT_TIME):
             return True
     return False
 
 
 def should_ignore_cbs_lock(entry: LogEntry) -> bool:
     if entry.msg.startswith(CBS_LOCK):
-        rest = entry.msg.removeprefix(CBS_LOCK)
-        if CBS_LOCK_NEW_LOCK_ADDED.fullmatch(rest):
+        submsg = entry.msg.removeprefix(CBS_LOCK)
+        if CBS_LOCK_NEW_LOCK_ADDED.fullmatch(submsg):
+            return True
+    return False
+
+
+def should_ignore_csi(entry: LogEntry) -> bool:
+    if entry.src == CSI:
+        if CSI_WCPINITIALIZE_CALLED.fullmatch(entry.msg):
             return True
     return False
 
