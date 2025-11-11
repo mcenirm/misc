@@ -156,7 +156,7 @@ class DnsRecord:
 
     def __lt__(self, other) -> bool:
         if isinstance(other, DnsRecord):
-            return self.rrs.name < other.rrs.name
+            return (self.name, self.type, self.rd) < (other.name, other.type, other.rd)
         else:
             raise NotImplemented
 
@@ -548,7 +548,7 @@ def resolve_name_to_type_to_targets(
     res = dns.resolver.Resolver()
     for n, t in pairs:
         for rrs in res.resolve(n, t, raise_on_no_answer=False).response.answer:
-            rrs_name = rrs.name.to_text()
+            rrs_name = rrs.name.to_text().lower()
             rd: dns.rdata.Rdata
             for rd in rrs.items.keys():
                 rd_type = rd.rdtype.name
@@ -638,6 +638,7 @@ def main():
                     rtarget.ljust(40),
                     flag(exists=exists, should_exist=should_exist),
                 )
+            print()
         print()
 
 
@@ -657,14 +658,14 @@ def flag(exists: bool, should_exist: bool, concise=False) -> str:
     else:
         if exists:
             if should_exist:
-                flag = ".. exists"
+                flag = ".. do not remove"
             else:
                 flag = "REMOVE"
         else:
             if should_exist:
                 flag = "ADD"
             else:
-                flag = ".. does not exist"
+                flag = ".. do not add"
         flag = "# " + flag
     return flag
 
