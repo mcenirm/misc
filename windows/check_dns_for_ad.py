@@ -13,6 +13,9 @@ import uuid
 
 import dataclasses_json
 import dns.name
+import dns.rdata
+import dns.rdatatype
+import dns.resolver
 
 # https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/c1987d42-1847-4cc9-acf7-aab2136d6952
 # 6.3.2.3 SRV Records
@@ -52,49 +55,74 @@ class PendingAction(enum.StrEnum):
     DEMOTE = enum.auto()
     REMOVE = enum.auto()
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__ + "." + self.name
+
 
 class DnsRecordType(enum.StrEnum):
     A = enum.auto()
     CNAME = enum.auto()
     SRV = enum.auto()
 
+    def __repr__(self) -> str:
+        return self.__class__.__name__ + "." + self.name
+
 
 class DnsName:
     def __init__(self, *args) -> None:
         if not args:
             raise ValueError("missing args")
-        labels: list[bytes | str] = []
+        labels: list[bytes] = []
         for i, arg in enumerate(args):
             if isinstance(arg, DnsName):
-                ext = arg._name.labels
-            elif isinstance(arg, str):
-                ext = arg.split(".")
-            elif isinstance(arg, bytes):
-                ext = arg.split(b".")
+                ext = arg.name.labels
             elif isinstance(arg, dns.name.Name):
                 ext = arg.labels
+            elif isinstance(arg, str):
+                ext = arg.lower().encode().split(b".")
+            elif isinstance(arg, bytes):
+                ext = arg.lower().split(b".")
             else:
                 raise ValueError("bad label at index", i, arg)
             labels.extend(ext)
         self._name = dns.name.Name(labels).canonicalize()
 
     @property
+    def name(self) -> dns.name.Name:
+        return dns.name.Name(self.labels)
+
+    @property
     def labels(self) -> tuple[str, ...]:
         return tuple([str(x, encoding="utf8") for x in self._name.labels])
 
     def anchor(self) -> typing.Self:
-        self._name = self._name.concatenate(dns.name.empty)
+        if not self._name.is_absolute():
+            self._name = dns.name.Name(list(self.labels) + [b""])
         return self
 
     def __str__(self) -> str:
         return self._name.to_text(omit_final_dot=False)
 
+    def __repr__(self) -> str:
+        return (
+            self.__class__.__name__
+            + "("
+            + ", ".join([repr(x) for x in self.labels])
+            + ")"
+        )
+
     def __truediv__(self, other) -> DnsName:
-        return DnsName(DnsName(other)._name.concatenate(self._name))
+        if isinstance(other, (DnsName, dns.name.Name)):
+            suffix_labels = other.labels
+        elif isinstance(other, (str, bytes)):
+            suffix_labels = [other]
+        else:
+            raise NotImplemented
+        return DnsName(*suffix_labels, *self.labels)
 
     def __lt__(self, other) -> bool:
         if isinstance(other, DnsName):
-            return self._name < other._name.__lt__
+            return self._name < other._name
         else:
             raise NotImplemented
 
@@ -105,6 +133,9 @@ class DnsRecord:
     type: DnsRecordType
     target: str
     action: PendingAction
+
+    def __hash__(self) -> int:
+        return hash((self.name, self.type, self.target))
 
     @classmethod
     def a(
@@ -125,7 +156,7 @@ class DnsRecord:
         return cls(
             name=name.anchor(),
             type=DnsRecordType.CNAME,
-            target=str(target),
+            target=str(target.anchor()),
             action=action,
         )
 
@@ -144,7 +175,9 @@ class DnsRecord:
         return cls(
             name=DnsName(port.for_srv(), protocol.for_srv(), base).anchor(),
             type=DnsRecordType.SRV,
-            target=" ".join([str(x) for x in [priority, weight, port, target]]),
+            target=" ".join(
+                [str(x) for x in [priority, weight, port, target.anchor()]]
+            ),
             action=action,
         )
 
@@ -199,6 +232,9 @@ class ServerConfig:
     is_pdc: bool = False
     is_rodc: bool = False
     pending_action: PendingAction = PendingAction.KEEP
+
+    def __hash__(self) -> int:
+        return hash((self.name, self.dsa_guid))
 
     def get_dns_records(
         self,
@@ -387,6 +423,25 @@ def dump_extras(d: dict, label: str) -> None:
         print()
 
 
+def dump_attrs_for_dns_object(o: object) -> None:
+    for k, v in ((k, getattr(o, k)) for k in dir(o) if not k.startswith("_")):
+        kpadded = k.ljust(20)
+        if v is None:
+            print("**", kpadded, "is ", "None")
+        elif hasattr(v, "name"):
+            print("**", kpadded, " = ", getattr(v, "name"))
+        elif isinstance(v, (dns.rdatatype.RdataType,)):
+            print("**", kpadded, " = ", v.name)
+        elif isinstance(v, (str, int)):
+            print("**", kpadded, " = ", repr(v))
+        elif isinstance(v, (dns.name.Name,)):
+            print("**", kpadded, " = ", v)
+        elif callable(v):
+            pass
+        else:
+            print("**", kpadded, "isa", type(v))
+
+
 def flatten(container) -> typing.Generator[object, None, None]:
     if isinstance(container, str):
         yield container
@@ -397,24 +452,120 @@ def flatten(container) -> typing.Generator[object, None, None]:
         yield str(container)
 
 
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class AllTheDnsRecordsThatMightBeNeeded:
+    server_to_action_to_records: dict[
+        ServerConfig, dict[PendingAction, list[DnsRecord]]
+    ]
+    dnsname_to_records: dict[DnsName, list[DnsRecord]]
+    record_to_server: dict[DnsRecord, ServerConfig]
+
+
+def get_all_dns_records_that_might_be_needed(
+    domain: DomainConfig,
+) -> AllTheDnsRecordsThatMightBeNeeded:
+    server_to_action_to_records: dict[
+        ServerConfig, dict[PendingAction, list[DnsRecord]]
+    ] = collections.defaultdict(lambda: collections.defaultdict(list))
+    dnsname_to_records: dict[DnsName, list[DnsRecord]] = collections.defaultdict(list)
+    record_to_server: dict[DnsRecord, ServerConfig] = dict()
+    for site in domain.sites:
+        for server in site.servers:
+            records = server.get_dns_records(
+                forest_name=domain.dns_name,
+                domain_name=domain.dns_name,
+                domain_guid=domain.domain_guid,
+                site_names=[site.name],
+            )
+            for r in records:
+                server_to_action_to_records[server][r.action].append(r)
+                dnsname_to_records[r.name].append(r)
+                record_to_server[r] = server
+    return AllTheDnsRecordsThatMightBeNeeded(
+        server_to_action_to_records=server_to_action_to_records,
+        dnsname_to_records=dnsname_to_records,
+        record_to_server=record_to_server,
+    )
+
+
+def resolve_name_to_type_to_targets(
+    name_type_pairs: collections.abc.Iterable[tuple[str, str]],
+) -> dict[str, dict[str, list[str]]]:
+    pairs = set(name_type_pairs)
+    name_to_type_to_targets: dict[str, dict[str, list[str]]] = collections.defaultdict(
+        lambda: collections.defaultdict(list)
+    )
+    res = dns.resolver.Resolver()
+    for n, t in pairs:
+        for rrs in res.resolve(n, t, raise_on_no_answer=False).response.answer:
+            rrs_name = rrs.name.to_text()
+            rd: dns.rdata.Rdata
+            for rd in rrs.items.keys():
+                rd_type = rd.rdtype.name
+                if rd.rdtype == dns.rdatatype.A:
+                    rd_target = str(rd.address)
+                elif rd.rdtype == dns.rdatatype.CNAME:
+                    rd_target = str(rd.target)
+                elif rd.rdtype == dns.rdatatype.SRV:
+                    rd_target = f"{rd.priority} {rd.weight} {rd.port} {rd.target}"
+                else:
+                    dump_attrs_for_dns_object(rd)
+                    raise NotImplementedError(
+                        "expected rd.target or rd.address", dict(rrs=rrs, rd=rd)
+                    )
+                name_to_type_to_targets[rrs_name][rd_type].append(rd_target)
+    return name_to_type_to_targets
+
+
 def main():
     configfile = pathlib.Path(sys.argv[1])
     for domain in load_domains_config_from_json(configfile):
-        records = domain.get_dns_records()
-        w = max([len(str(r.name)) for r in records])
-        for action in PendingAction:
-            filtered = [r for r in records if r.action == action]
-            if filtered:
-                print("##", action.name)
-                for r in sorted(filtered):
-                    print(
-                        str(r.name).ljust(w),
-                        "  ",
-                        r.type.name.ljust(6),
-                        "  ",
-                        r.target,
-                    )
-                print()
+        print("#", "Domain:", domain.dns_name, domain.domain_guid)
+        atdrtmbn = get_all_dns_records_that_might_be_needed(domain)
+        existing_name_to_type_to_targets = resolve_name_to_type_to_targets(
+            (r.name.name.to_text(), r.type.name)
+            for r in atdrtmbn.record_to_server.keys()
+        )
+        w = 1 + max([len(str(r.name)) for r in atdrtmbn.record_to_server.keys()])
+        for server, action_to_records in atdrtmbn.server_to_action_to_records.items():
+            print(
+                "##",
+                server.pending_action.name,
+                "Server:",
+                server.name,
+                server.dsa_guid,
+                "GC" if server.is_gc else "",
+                "PDC" if server.is_pdc else "",
+                "RODC" if server.is_rodc else "",
+            )
+            for action, records in action_to_records.items():
+                should_exist = action in (PendingAction.KEEP, PendingAction.PROMOTE)
+                filtered = [r for r in records if r.action == action]
+                to_be_removed = []
+                to_be_added = []
+                for record in sorted(filtered):
+                    rname = record.name.name.to_text()
+                    rtype = record.type.name
+                    rtarget = record.target
+                    exists = rtarget in existing_name_to_type_to_targets.get(
+                        rname, {}
+                    ).get(rtype, [])
+                    flag = "??"
+                    if exists:
+                        if should_exist:
+                            flag = "oo"
+                        else:
+                            flag = "--"
+                    else:
+                        if should_exist:
+                            flag = "++"
+                        else:
+                            flag = ";;"
+                    print(flag, rname.rjust(w), rtype.ljust(6), rtarget)
+                    if exists and not should_exist:
+                        to_be_removed.append(record)
+                    elif should_exist and not exists:
+                        to_be_added.append(record)
 
 
 if __name__ == "__main__":
