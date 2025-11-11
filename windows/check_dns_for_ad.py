@@ -60,6 +60,9 @@ class PendingAction(enum.StrEnum):
     DEMOTE = enum.auto()
     REMOVE = enum.auto()
 
+    def should_exist(self) -> bool:
+        return self in {PendingAction.KEEP, PendingAction.PROMOTE}
+
     def __repr__(self) -> str:
         return self.__class__.__name__ + "." + self.name
 
@@ -589,7 +592,7 @@ def main():
                 "RODC" if server.is_rodc else "",
             )
             for action, records in action_to_records.items():
-                should_exist = action in (PendingAction.KEEP, PendingAction.PROMOTE)
+                should_exist = action.should_exist()
                 filtered = [r for r in records if r.action == action]
                 to_be_removed = []
                 to_be_added = []
@@ -600,22 +603,70 @@ def main():
                     exists = rtarget in existing_name_to_type_to_targets.get(
                         rname, {}
                     ).get(rtype, [])
-                    flag = "??"
-                    if exists:
-                        if should_exist:
-                            flag = "oo"
-                        else:
-                            flag = "--"
-                    else:
-                        if should_exist:
-                            flag = "++"
-                        else:
-                            flag = ";;"
-                    print(flag, rname.rjust(w), rtype.ljust(6), rtarget)
+                    print(
+                        rname.rjust(w),
+                        rtype.ljust(6),
+                        rtarget.ljust(40),
+                        flag(exists=exists, should_exist=should_exist),
+                    )
                     if exists and not should_exist:
                         to_be_removed.append(record)
                     elif should_exist and not exists:
                         to_be_added.append(record)
+        print()
+        print("## Changes needed")
+        for name, records in atdrtmbn.name_to_records.items():
+            possible_types = {r.type for r in records}
+            if len(possible_types) != 1:
+                raise NotImplementedError(
+                    "name without exactly one possible type",
+                    dict(name=name, possible_types=possible_types, records=records),
+                )
+            possible_type = list(possible_types)[0]
+            existing_targets = existing_name_to_type_to_targets.get(
+                name.to_text(), {}
+            ).get(possible_type.name, [])
+            for record in records:
+                rname = record.name.to_text()
+                rtype = record.type.name
+                rtarget = record.target
+                exists = rtarget in existing_targets
+                should_exist = record.action.should_exist()
+                print(
+                    rname.rjust(w),
+                    rtype.ljust(6),
+                    rtarget.ljust(40),
+                    flag(exists=exists, should_exist=should_exist),
+                )
+        print()
+
+
+def flag(exists: bool, should_exist: bool, concise=False) -> str:
+    if concise:
+        flag = "??"
+        if exists:
+            if should_exist:
+                flag = "oo"
+            else:
+                flag = "--"
+        else:
+            if should_exist:
+                flag = "++"
+            else:
+                flag = ";;"
+    else:
+        if exists:
+            if should_exist:
+                flag = ".. exists"
+            else:
+                flag = "REMOVE"
+        else:
+            if should_exist:
+                flag = "ADD"
+            else:
+                flag = ".. does not exist"
+        flag = "# " + flag
+    return flag
 
 
 if __name__ == "__main__":
