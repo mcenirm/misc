@@ -34,15 +34,28 @@ _MSDCS = "_msdcs"
 _SITES = "_sites"
 
 
-class WellKnownSrvPort(enum.IntEnum):
+class Service(enum.StrEnum):
+    KERBEROS = enum.auto()
+    LDAP = enum.auto()
+    KPASSWD = enum.auto()
+    GC = enum.auto()
+
+    @functools.cache
+    def for_srv(self) -> str:
+        return "_" + self.name.lower()
+
+    def default_port(self) -> Port:
+        return getattr(Port, self.name)
+
+
+class Port(enum.IntEnum):
     KERBEROS = 88
     LDAP = 389
     KPASSWD = 464
     GC = 3268
 
-    @functools.cache
-    def for_srv(self) -> str:
-        return "_" + self.name.lower()
+    def default_service(self) -> Service:
+        return getattr(Service, self.name)
 
 
 class Protocol(enum.StrEnum):
@@ -99,6 +112,15 @@ class DnsName:
             self._name = dns.name.Name(list(self.labels) + [b""])
         return self
 
+    def __eq__(self, value: object) -> bool:
+        if isinstance(value, DnsName):
+            return self.name == value.name
+        else:
+            raise NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._name)
+
     def __str__(self) -> str:
         return self._name.to_text(omit_final_dot=False)
 
@@ -126,37 +148,31 @@ class DnsName:
             raise NotImplemented
 
 
+type DnsRecordType = dns.rdatatype.RdataType
+type DnsRecordData = dns.rdata.Rdata
+
+
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class DnsRecord:
-    rrs: dns.rrset.RRset
+    name: DnsName
+    type_: DnsRecordType
+    data: DnsRecordData
     action: PendingAction
-
-    def __post_init__(self):
-        if 1 != len(self.rrs):
-            raise ValueError("rrs does not have 1 item", self.rrs)
-
-    @property
-    def name(self) -> dns.name.Name:
-        return self.rrs.name
-
-    @property
-    def type(self) -> dns.rdatatype.RdataType:
-        return self.rrs.rdtype
-
-    @property
-    def rd(self) -> dns.rdata.Rdata:
-        return list(self.rrs)[0]
 
     @property
     def target(self) -> str:
-        return self.rd.to_text()
+        return self.data.to_text()
 
     def __hash__(self) -> int:
-        return hash((self.name, self.type, self.target))
+        return hash((self.name, self.type_, self.target))
 
     def __lt__(self, other) -> bool:
         if isinstance(other, DnsRecord):
-            return (self.name, self.type, self.rd) < (other.name, other.type, other.rd)
+            return (self.name, self.type_, self.data) < (
+                other.name,
+                other.type_,
+                other.data,
+            )
         else:
             raise NotImplemented
 
@@ -165,46 +181,44 @@ class DnsRecord:
         cls,
         *,
         name: DnsName,
-        type: dns.rdatatype.RdataType,
+        type_: DnsRecordType,
         action: PendingAction,
         **rdargs,
     ) -> DnsRecord:
         name = DnsName(name).anchor()
-        rrs = dns.rrset.RRset(name=name.name, rdclass=dns.rdataclass.IN, rdtype=type)
         ctr: typing.Type[dns.rdata.Rdata] = {
             dns.rdatatype.A: dns.rdtypes.IN.A.A,
             dns.rdatatype.CNAME: dns.rdtypes.ANY.CNAME.CNAME,
             dns.rdatatype.SRV: dns.rdtypes.IN.SRV.SRV,
-        }[rrs.rdtype]
+        }[type_]
         rdargs = dict(rdargs)
         if "target" in rdargs:
             rdargs["target"] = rdargs["target"].anchor().name
-        rd = ctr(rdclass=rrs.rdclass, rdtype=rrs.rdtype, **rdargs)
-        rrs.add(rd)
-        return cls(rrs=rrs, action=action)
+        rd = ctr(rdclass=dns.rdataclass.IN, rdtype=type_, **rdargs)
+        return cls(name=name, type_=type_, data=rd, action=action)
 
     @classmethod
     def A(
         cls, *, name: DnsName, target: ipaddress.IPv4Address, action: PendingAction
     ) -> DnsRecord:
-        return cls._make(name=name, type=dns.rdatatype.A, action=action, address=target)
+        return cls._make(
+            name=name, type_=dns.rdatatype.A, action=action, address=target
+        )
 
     @classmethod
     def CNAME(
         cls, *, name: DnsName, target: DnsName, action: PendingAction
     ) -> DnsRecord:
         return cls._make(
-            name=name,
-            type=dns.rdatatype.CNAME,
-            action=action,
-            target=target,
+            name=name, type_=dns.rdatatype.CNAME, action=action, target=target
         )
 
     @classmethod
     def SRV(
         cls,
         *,
-        port: WellKnownSrvPort,
+        service: Service,
+        port: Port,
         protocol: Protocol,
         base: DnsName,
         action: PendingAction,
@@ -212,10 +226,10 @@ class DnsRecord:
         priority=0,
         weight=100,
     ) -> DnsRecord:
-        name = DnsName(port.for_srv(), protocol.for_srv(), base)
+        name = DnsName(service.for_srv(), protocol.for_srv(), base)
         return cls._make(
             name=name,
-            type=dns.rdatatype.SRV,
+            type_=dns.rdatatype.SRV,
             action=action,
             port=port.value,
             priority=int(priority),
@@ -313,11 +327,11 @@ class ServerConfig:
 
         # GC
         *                                     gc._msdcs.{DOMAIN}.   A       {SERVER-IPv4}
-        *   _ldap    ._tcp.{SITE-NAME}._sites.gc._msdcs.{FOREST}.   SRV     0 100 389 {SERVER}.{DOMAIN}.
+        *   _ldap    ._tcp.{SITE-NAME}._sites.gc._msdcs.{FOREST}.   SRV     0 100 3268 {SERVER}.{DOMAIN}.
         *   _gc      ._tcp.{SITE-NAME}._sites          .{FOREST}.   SRV     0 100 3268 {SERVER}.{DOMAIN}.
 
         # non-RODC and GC
-        *   _ldap    ._tcp                   .gc._msdcs.{FOREST}.   SRV     0 100 389 {SERVER}.{DOMAIN}.
+        *   _ldap    ._tcp                   .gc._msdcs.{FOREST}.   SRV     0 100 3268 {SERVER}.{DOMAIN}.
         *   _gc      ._tcp                             .{FOREST}.   SRV     0 100 3268 {SERVER}.{DOMAIN}.
 
         # PDC
@@ -345,7 +359,13 @@ class ServerConfig:
 
         # all domain controllers
         for addr in self.ipv4:
-            r.append(DnsRecord.A(name=domain_fqdn, target=addr, action=action_all))
+            r.append(
+                DnsRecord.A(
+                    name=domain_fqdn,
+                    target=addr,
+                    action=action_all,
+                )
+            )
         r.append(
             DnsRecord.CNAME(
                 name=forest_fqdn / _MSDCS / str(self.dsa_guid),
@@ -354,13 +374,17 @@ class ServerConfig:
             )
         )
         for site_name in site_names:
-            for port in [WellKnownSrvPort.LDAP, WellKnownSrvPort.KERBEROS]:
+            for port in [
+                Port.LDAP,
+                Port.KERBEROS,
+            ]:
                 for base in [
                     domain_fqdn / _MSDCS / "dc" / _SITES / site_name,
                     domain_fqdn / _SITES / site_name,
                 ]:
                     r.append(
                         DnsRecord.SRV(
+                            service=port.default_service(),
                             port=port,
                             protocol=Protocol.TCP,
                             base=base,
@@ -371,21 +395,22 @@ class ServerConfig:
 
         # non-RODC
         for port, protocol, base in [
-            [WellKnownSrvPort.LDAP, Protocol.TCP, domain_fqdn],
-            [WellKnownSrvPort.LDAP, Protocol.TCP, domain_fqdn / _MSDCS / "dc"],
+            [Port.LDAP, Protocol.TCP, domain_fqdn],
+            [Port.LDAP, Protocol.TCP, domain_fqdn / _MSDCS / "dc"],
             [
-                WellKnownSrvPort.LDAP,
+                Port.LDAP,
                 Protocol.TCP,
                 forest_fqdn / _MSDCS / "domains" / str(domain_guid),
             ],
-            [WellKnownSrvPort.KPASSWD, Protocol.UDP, domain_fqdn],
-            [WellKnownSrvPort.KPASSWD, Protocol.TCP, domain_fqdn],
-            [WellKnownSrvPort.KERBEROS, Protocol.UDP, domain_fqdn],
-            [WellKnownSrvPort.KERBEROS, Protocol.TCP, domain_fqdn],
-            [WellKnownSrvPort.KERBEROS, Protocol.TCP, domain_fqdn / _MSDCS / "dc"],
+            [Port.KPASSWD, Protocol.UDP, domain_fqdn],
+            [Port.KPASSWD, Protocol.TCP, domain_fqdn],
+            [Port.KERBEROS, Protocol.UDP, domain_fqdn],
+            [Port.KERBEROS, Protocol.TCP, domain_fqdn],
+            [Port.KERBEROS, Protocol.TCP, domain_fqdn / _MSDCS / "dc"],
         ]:
             r.append(
                 DnsRecord.SRV(
+                    service=port.default_service(),
                     port=port,
                     protocol=protocol,
                     base=base,
@@ -398,41 +423,37 @@ class ServerConfig:
         for addr in self.ipv4:
             r.append(
                 DnsRecord.A(
-                    name=domain_fqdn / _MSDCS / "gc", target=addr, action=action_gc
+                    name=domain_fqdn / _MSDCS / "gc",
+                    target=addr,
+                    action=action_gc,
                 )
             )
-            for site_name in site_names:
-                for port, protocol, base in [
-                    [
-                        WellKnownSrvPort.LDAP,
-                        Protocol.TCP,
-                        forest_fqdn / _MSDCS / "gc" / _SITES / site_name,
-                    ],
-                    [
-                        WellKnownSrvPort.GC,
-                        Protocol.TCP,
-                        forest_fqdn / _SITES / site_name,
-                    ],
-                ]:
-                    r.append(
-                        DnsRecord.SRV(
-                            port=port,
-                            protocol=protocol,
-                            base=base,
-                            target=my_fqdn,
-                            action=action_gc,
-                        )
+        for site_name in site_names:
+            for service, base in [
+                [Service.LDAP, forest_fqdn / _MSDCS / "gc" / _SITES / site_name],
+                [Service.GC, forest_fqdn / _SITES / site_name],
+            ]:
+                r.append(
+                    DnsRecord.SRV(
+                        service=service,
+                        port=Port.GC,
+                        protocol=Protocol.TCP,
+                        base=base,
+                        target=my_fqdn,
+                        action=action_gc,
                     )
+                )
 
         # non-RODC and GC
-        for port, protocol, base in [
-            [WellKnownSrvPort.LDAP, Protocol.TCP, forest_fqdn / _MSDCS / "gc"],
-            [WellKnownSrvPort.GC, Protocol.TCP, forest_fqdn],
+        for service, base in [
+            [Service.LDAP, forest_fqdn / _MSDCS / "gc"],
+            [Service.GC, forest_fqdn],
         ]:
             r.append(
                 DnsRecord.SRV(
-                    port=port,
-                    protocol=protocol,
+                    service=service,
+                    port=Port.GC,
+                    protocol=Protocol.TCP,
                     base=base,
                     target=my_fqdn,
                     action=action_non_rodc_and_gc,
@@ -440,18 +461,16 @@ class ServerConfig:
             )
 
         # PDC
-        for port, protocol, base in [
-            [WellKnownSrvPort.LDAP, Protocol.TCP, domain_fqdn / _MSDCS / "pdc"],
-        ]:
-            r.append(
-                DnsRecord.SRV(
-                    port=port,
-                    protocol=protocol,
-                    base=base,
-                    target=my_fqdn,
-                    action=action_pdc,
-                )
+        r.append(
+            DnsRecord.SRV(
+                service=Service.LDAP,
+                port=Port.LDAP,
+                protocol=Protocol.TCP,
+                base=domain_fqdn / _MSDCS / "pdc",
+                target=my_fqdn,
+                action=action_pdc,
             )
+        )
 
         return r
 
@@ -501,23 +520,21 @@ def flatten(container) -> typing.Generator[object, None, None]:
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
-class AllTheDnsRecordsThatMightBeNeeded:
+class AllDnsRecordsThatMightBeNeeded:
     server_to_action_to_records: dict[
         ServerConfig, dict[PendingAction, list[DnsRecord]]
     ]
-    name_to_records: dict[dns.name.Name, list[DnsRecord]]
+    name_to_records: dict[DnsName, list[DnsRecord]]
     record_to_server: dict[DnsRecord, ServerConfig]
 
 
 def get_all_dns_records_that_might_be_needed(
     domain: DomainConfig,
-) -> AllTheDnsRecordsThatMightBeNeeded:
+) -> AllDnsRecordsThatMightBeNeeded:
     server_to_action_to_records: dict[
         ServerConfig, dict[PendingAction, list[DnsRecord]]
     ] = collections.defaultdict(lambda: collections.defaultdict(list))
-    dnsname_to_records: dict[dns.name.Name, list[DnsRecord]] = collections.defaultdict(
-        list
-    )
+    dnsname_to_records: dict[DnsName, list[DnsRecord]] = collections.defaultdict(list)
     record_to_server: dict[DnsRecord, ServerConfig] = dict()
     for site in domain.sites:
         for server in site.servers:
@@ -531,56 +548,99 @@ def get_all_dns_records_that_might_be_needed(
                 server_to_action_to_records[server][r.action].append(r)
                 dnsname_to_records[r.name].append(r)
                 record_to_server[r] = server
-    return AllTheDnsRecordsThatMightBeNeeded(
+    return AllDnsRecordsThatMightBeNeeded(
         server_to_action_to_records=server_to_action_to_records,
         name_to_records=dnsname_to_records,
         record_to_server=record_to_server,
     )
 
 
-def resolve_name_to_type_to_targets(
-    name_type_pairs: collections.abc.Iterable[tuple[str, str]],
-) -> dict[str, dict[str, list[str]]]:
+def resolve_name_to_type_to_record_data_list(
+    name_type_pairs: collections.abc.Iterable[tuple[DnsName, DnsRecordType]],
+) -> dict[DnsName, dict[DnsRecordType, list[DnsRecordData]]]:
     pairs = set(name_type_pairs)
-    name_to_type_to_targets: dict[str, dict[str, list[str]]] = collections.defaultdict(
-        lambda: collections.defaultdict(list)
+    name_to_type_to_records: dict[DnsName, dict[DnsRecordType, list[DnsRecordData]]] = (
+        collections.defaultdict(lambda: collections.defaultdict(list))
     )
     res = dns.resolver.Resolver()
     for n, t in pairs:
-        for rrs in res.resolve(n, t, raise_on_no_answer=False).response.answer:
-            rrs_name = rrs.name.to_text().lower()
-            rd: dns.rdata.Rdata
-            for rd in rrs.items.keys():
-                rd_type = rd.rdtype.name
-                if rd.rdtype == dns.rdatatype.A:
-                    rd_target = str(
-                        rd.address  # pyright: ignore[reportAttributeAccessIssue]
-                    )
-                elif rd.rdtype == dns.rdatatype.CNAME:
-                    rd_target = str(
-                        rd.target  # pyright: ignore[reportAttributeAccessIssue]
-                    )
-                elif rd.rdtype == dns.rdatatype.SRV:
-                    rd_target = f"{rd.priority} {rd.weight} {rd.port} {rd.target}"  # pyright: ignore[reportAttributeAccessIssue]
-                else:
-                    dump_attrs_for_dns_object(rd)
-                    raise NotImplementedError(
-                        "expected rd.target or rd.address", dict(rrs=rrs, rd=rd)
-                    )
-                name_to_type_to_targets[rrs_name][rd_type].append(rd_target)
-    return name_to_type_to_targets
+        try:
+            for rrs in res.resolve(n.name, t, raise_on_no_answer=False).response.answer:
+                name_to_type_to_records[DnsName(rrs.name)][rrs.rdtype].extend(
+                    rrs.items.keys()
+                )
+        except dns.resolver.NXDOMAIN:
+            pass
+    return name_to_type_to_records
+
+
+def split_rrs(rrs: dns.rrset.RRset) -> list[dns.rrset.RRset]:
+    r = []
+    rd: dns.rdata.Rdata
+    for rd in rrs.items.keys():
+        newrrs = dns.rrset.RRset(
+            name=rrs.name,
+            rdclass=rrs.rdclass,
+            rdtype=rrs.rdtype,
+            covers=rrs.covers,
+            deleting=rrs.deleting,
+        )
+        newrrs.add(rd=rd, ttl=rrs.ttl)
+        r.append(newrrs)
+    return r
+
+
+def make_record_printer(
+    name_width: int, type_width=6, target_width=40, print_=print
+) -> collections.abc.Callable[[DnsRecord, str | None], None]:
+    def record_printer(r: DnsRecord, flag: str | None):
+        na = str(r.name).rjust(name_width)
+        ty = r.type_.name.upper().ljust(type_width)
+        ta = r.target.ljust(target_width)
+        if flag is None:
+            print_(na, ty, ta)
+        else:
+            print_(na, ty, ta, flag)
+
+    return record_printer
 
 
 def main():
     configfile = pathlib.Path(sys.argv[1])
     for domain in load_domains_config_from_json(configfile):
         print("#", "Domain:", domain.dns_name, domain.domain_guid)
-        atdrtmbn = get_all_dns_records_that_might_be_needed(domain)
-        existing_name_to_type_to_targets = resolve_name_to_type_to_targets(
-            (r.name.to_text(), r.type.name) for r in atdrtmbn.record_to_server.keys()
+        adrtmbn = get_all_dns_records_that_might_be_needed(domain)
+        existing_name_to_type_to_record_data_list = (
+            resolve_name_to_type_to_record_data_list(
+                (r.name, r.type_) for r in adrtmbn.record_to_server.keys()
+            )
         )
-        w = 1 + max([len(str(r.name)) for r in atdrtmbn.record_to_server.keys()])
-        for server, action_to_records in atdrtmbn.server_to_action_to_records.items():
+        existing = {
+            (n, t, d)
+            for n, t2ds in existing_name_to_type_to_record_data_list.items()
+            for t, ds in t2ds.items()
+            for d in ds
+        }
+        expected = {(r.name, r.type_, r.data) for r in adrtmbn.record_to_server.keys()}
+        existing_but_not_expected = existing - expected
+        expected_but_not_existing = expected - existing
+        if False:
+            print(f"{len(existing)=}")
+            print(f"{len(expected)=}")
+            print(f"{len(existing_but_not_expected)=}")
+            print(f"{len(expected_but_not_existing)=}")
+            testcase = sorted(existing)[0]
+            print(testcase)
+            for i in range(3):
+                print(testcase[i])
+                for r in expected:
+                    if r[i] == testcase[i]:
+                        print(testcase == r, r)
+            raise SystemExit
+        record_printer = make_record_printer(
+            1 + max([len(str(r.name)) for r in adrtmbn.record_to_server.keys()])
+        )
+        for server, action_to_records in adrtmbn.server_to_action_to_records.items():
             print(
                 "##",
                 server.pending_action.name,
@@ -597,17 +657,14 @@ def main():
                 to_be_removed = []
                 to_be_added = []
                 for record in sorted(filtered):
-                    rname = record.name.to_text()
-                    rtype = record.type.name
-                    rtarget = record.target
-                    exists = rtarget in existing_name_to_type_to_targets.get(
-                        rname, {}
-                    ).get(rtype, [])
-                    print(
-                        rname.rjust(w),
-                        rtype.ljust(6),
-                        rtarget.ljust(40),
-                        flag(exists=exists, should_exist=should_exist),
+                    exists = (
+                        record.data
+                        in existing_name_to_type_to_record_data_list.get(
+                            record.name, {}
+                        ).get(record.type_, [])
+                    )
+                    record_printer(
+                        record, flag(exists=exists, should_exist=should_exist)
                     )
                     if exists and not should_exist:
                         to_be_removed.append(record)
@@ -615,31 +672,37 @@ def main():
                         to_be_added.append(record)
         print()
         print("## Changes needed")
-        for name, records in atdrtmbn.name_to_records.items():
-            possible_types = {r.type for r in records}
+        only_should_exist_records: list[DnsRecord] = []
+        for name, records in sorted(adrtmbn.name_to_records.items()):
+            possible_types = {r.type_ for r in records}
             if len(possible_types) != 1:
                 raise NotImplementedError(
                     "name without exactly one possible type",
                     dict(name=name, possible_types=possible_types, records=records),
                 )
             possible_type = list(possible_types)[0]
-            existing_targets = existing_name_to_type_to_targets.get(
-                name.to_text(), {}
-            ).get(possible_type.name, [])
-            for record in records:
-                rname = record.name.to_text()
-                rtype = record.type.name
-                rtarget = record.target
-                exists = rtarget in existing_targets
+            existing_targets = existing_name_to_type_to_record_data_list.get(
+                name, {}
+            ).get(possible_type, [])
+            for record in sorted(records):
+                exists = record.data in existing_targets
                 should_exist = record.action.should_exist()
-                print(
-                    rname.rjust(w),
-                    rtype.ljust(6),
-                    rtarget.ljust(40),
-                    flag(exists=exists, should_exist=should_exist),
-                )
+                record_printer(record, flag(exists=exists, should_exist=should_exist))
+                if should_exist:
+                    only_should_exist_records.append(record)
             print()
         print()
+        print("## Only the records that should exist")
+        for r in sorted(only_should_exist_records):
+            record_printer(r, None)
+        print()
+        if existing_but_not_expected:
+            print("## Existing but not expected")
+            for n, t, d in sorted(existing_but_not_expected):
+                record_printer(
+                    DnsRecord(name=n, type_=t, data=d, action=PendingAction.KEEP), None
+                )
+            print()
 
 
 def flag(exists: bool, should_exist: bool, concise=False) -> str:
