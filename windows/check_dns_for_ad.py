@@ -671,8 +671,11 @@ def main():
                     elif should_exist and not exists:
                         to_be_added.append(record)
         print()
-        print("## Changes needed")
+        print("## All records that might be needed")
         only_should_exist_records: list[DnsRecord] = []
+        only_name_records_with_flags_where_any_change_needed: dict[
+            DnsName, list[tuple[DnsRecord, str]]
+        ] = {}
         for name, records in sorted(adrtmbn.name_to_records.items()):
             possible_types = {r.type_ for r in records}
             if len(possible_types) != 1:
@@ -684,17 +687,35 @@ def main():
             existing_targets = existing_name_to_type_to_record_data_list.get(
                 name, {}
             ).get(possible_type, [])
+            any_change_needed = False
+            records_with_flags = []
             for record in sorted(records):
                 exists = record.data in existing_targets
                 should_exist = record.action.should_exist()
-                record_printer(record, flag(exists=exists, should_exist=should_exist))
+                flag_for_record = flag(exists=exists, should_exist=should_exist)
+                record_printer(record, flag_for_record)
                 if should_exist:
                     only_should_exist_records.append(record)
+                if exists != should_exist:
+                    any_change_needed = True
+                    records_with_flags.append((record, flag_for_record))
+            if any_change_needed:
+                only_name_records_with_flags_where_any_change_needed[name] = (
+                    records_with_flags
+                )
             print()
         print()
         print("## Only the records that should exist")
         for r in sorted(only_should_exist_records):
             record_printer(r, None)
+        print()
+        print("## Only changes that are needed")
+        for name, records_with_flags in sorted(
+            only_name_records_with_flags_where_any_change_needed.items()
+        ):
+            for record, flag_for_record in records_with_flags:
+                record_printer(record, flag_for_record)
+            print()
         print()
         if existing_but_not_expected:
             print("## Existing but not expected")
