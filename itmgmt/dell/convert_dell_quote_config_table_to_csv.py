@@ -23,10 +23,17 @@ FIELDNAMES = [
 
 
 def main():
-    rowdicts: list[dict[str, object]] = []
-    for lineno, line in enumerate(
+    enumerated_lines = enumerate(
         pathlib.Path(sys.argv[1]).read_text(encoding="utf8").splitlines(), 1
-    ):
+    )
+    for lineno, line in enumerated_lines:
+        if line == "Components":
+            break
+    for lineno, line in enumerated_lines:
+        if line == "Expand All  Collapse All":
+            break
+    rowdicts: list[dict[str, object]] = []
+    for lineno, line in enumerated_lines:
         if line == "":
             continue
         mtch = re.compile(
