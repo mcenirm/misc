@@ -59,6 +59,14 @@ function stub_logger() {
 
 
 
+# intercept app location step
+############################################
+
+case "$#" in
+0)
+
+
+
 # set the directory abspath of the current
 # shell script with symlinks being resolved
 ############################################
@@ -83,6 +91,32 @@ stub_logger "[StubDir] $PROGDIR"
 
 # the absolute path of the app package
 cd "$PROGDIR"/../../ || exit 11
+
+
+
+# intercept app location step
+############################################
+
+	_show_command_line () { : ; }
+	;;
+1)
+	cd -- "$1" || exit 11
+	_show_command_line () {
+		printf '\n'
+		printf 'Command line: '
+		printf ' %q' "$@"
+		printf '\n'
+		printf '\n'
+	}
+	;;
+*)
+	echo >&2 "Usage: $0 [.../Foo.app]"
+	exit 1
+	;;
+esac
+
+
+
 AppPackageFolder=$(pwd)
 
 # the base path of the app package
@@ -896,13 +930,17 @@ stub_logger "[WorkingDirectory] ${WorkingDirectory}"
 # - main class arguments
 # - passthrough arguments from Terminal or Drag'n'Drop to Finder icon
 stub_logger "[Exec] \"$JAVACMD\" -cp \"${JVMClassPath}\" ${JVMSplashFile:+ -splash:\"${ResourcesFolder}/${JVMSplashFile}\"} -Xdock:icon=\"${ResourcesFolder}/${CFBundleIconFile}\" -Xdock:name=\"${CFBundleName}\" ${JVMOptionsArr:+$(printf "'%s' " "${JVMOptionsArr[@]}") }${JVMDefaultOptions:+$JVMDefaultOptions }${JVMMainClass}${MainArgsArr:+ $(printf "'%s' " "${MainArgsArr[@]}")}${ArgsPassthru:+ $(printf "'%s' " "${ArgsPassthru[@]}")}"
-exec "${JAVACMD}" \
-		-cp "${JVMClassPath}" \
-		${JVMSplashFile:+ -splash:"${ResourcesFolder}/${JVMSplashFile}"} \
-		-Xdock:icon="${ResourcesFolder}/${CFBundleIconFile}" \
-		-Xdock:name="${CFBundleName}" \
-		${JVMOptionsArr:+"${JVMOptionsArr[@]}" }\
-		${JVMDefaultOptions:+$JVMDefaultOptions }\
-		"${JVMMainClass}"\
-		${MainArgsArr:+ "${MainArgsArr[@]}"}\
-		${ArgsPassthru:+ "${ArgsPassthru[@]}"}
+_command_line=(
+	"${JAVACMD}"
+	-cp "${JVMClassPath}"
+	${JVMSplashFile:+ -splash:"${ResourcesFolder}/${JVMSplashFile}"}
+	-Xdock:icon="${ResourcesFolder}/${CFBundleIconFile}"
+	-Xdock:name="${CFBundleName}"
+	${JVMOptionsArr:+"${JVMOptionsArr[@]}" }
+	${JVMDefaultOptions:+$JVMDefaultOptions }
+	"${JVMMainClass}"
+	${MainArgsArr:+ "${MainArgsArr[@]}"}
+	${ArgsPassthru:+ "${ArgsPassthru[@]}"}
+)
+_show_command_line "${_command_line[@]}"
+exec "${_command_line[@]}"
