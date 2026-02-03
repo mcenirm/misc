@@ -20,6 +20,7 @@ import dns.rdtypes.ANY.CNAME
 import dns.rdtypes.IN.A
 import dns.rdtypes.IN.SRV
 import dns.resolver
+import dns.reversename
 import dns.rrset
 
 # https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/c1987d42-1847-4cc9-acf7-aab2136d6952
@@ -189,6 +190,7 @@ class DnsRecord:
         ctr: typing.Type[dns.rdata.Rdata] = {
             dns.rdatatype.A: dns.rdtypes.IN.A.A,
             dns.rdatatype.CNAME: dns.rdtypes.ANY.CNAME.CNAME,
+            dns.rdatatype.PTR: dns.rdtypes.ANY.PTR.PTR,  # pyright: ignore[reportAttributeAccessIssue]
             dns.rdatatype.SRV: dns.rdtypes.IN.SRV.SRV,
         }[type_]
         rdargs = dict(rdargs)
@@ -211,6 +213,21 @@ class DnsRecord:
     ) -> DnsRecord:
         return cls._make(
             name=name, type_=dns.rdatatype.CNAME, action=action, target=target
+        )
+
+    @classmethod
+    def PTR(
+        cls,
+        *,
+        addr: ipaddress.IPv4Address | ipaddress.IPv6Address,
+        name: DnsName,
+        action: PendingAction,
+    ) -> DnsRecord:
+        return cls._make(
+            name=DnsName(dns.reversename.from_address(str(addr))),
+            type_=dns.rdatatype.PTR,
+            action=action,
+            target=name,
         )
 
     @classmethod
@@ -309,11 +326,13 @@ class ServerConfig:
 
         # all domain controllers
         *                                               {DOMAIN}.   A       {SERVER-IPv4}
+        *                                      {SERVER}.{DOMAIN}.   A       {SERVER-IPv4}
         *                             {DSA-GUID}._msdcs.{FOREST}.   CNAME   {SERVER}.{DOMAIN}.
         *   _ldap    ._tcp.{SITE-NAME}._sites.dc._msdcs.{DOMAIN}.   SRV     0 100 389 {SERVER}.{DOMAIN}.
         *   _ldap    ._tcp.{SITE-NAME}._sites          .{DOMAIN}.   SRV     0 100 389 {SERVER}.{DOMAIN}.
         *   _kerberos._tcp.{SITE-NAME}._sites.dc._msdcs.{DOMAIN}.   SRV     0 100 88 {SERVER}.{DOMAIN}.
         *   _kerberos._tcp.{SITE-NAME}._sites          .{DOMAIN}.   SRV     0 100 88 {SERVER}.{DOMAIN}.
+        *                    {REVERSED-SERVER-IPv4}.in-addr.arpa.   PTR     {SERVER}.{DOMAIN}.
 
         # non-RODC
         *   _ldap    ._tcp                             .{DOMAIN}.   SRV     0 100 389 {SERVER}.{DOMAIN}.
@@ -359,10 +378,21 @@ class ServerConfig:
 
         # all domain controllers
         for addr in self.ipv4:
+            for name in [
+                domain_fqdn,
+                my_fqdn,
+            ]:
+                r.append(
+                    DnsRecord.A(
+                        name=name,
+                        target=addr,
+                        action=action_all,
+                    )
+                )
             r.append(
-                DnsRecord.A(
-                    name=domain_fqdn,
-                    target=addr,
+                DnsRecord.PTR(
+                    addr=addr,
+                    name=my_fqdn,
                     action=action_all,
                 )
             )
