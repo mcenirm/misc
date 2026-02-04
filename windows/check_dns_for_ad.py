@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import abc
 import collections.abc
 import dataclasses
 import enum
@@ -620,25 +621,119 @@ def split_rrs(rrs: dns.rrset.RRset) -> list[dns.rrset.RRset]:
     return r
 
 
-def make_record_printer(
-    name_width: int, type_width=6, target_width=40, print_=print
-) -> collections.abc.Callable[[DnsRecord, str | None], None]:
-    def record_printer(r: DnsRecord, flag: str | None):
-        na = str(r.name).rjust(name_width)
-        ty = r.type_.name.upper().ljust(type_width)
-        ta = r.target.ljust(target_width)
-        if flag is None:
-            print_(na, ty, ta)
-        else:
-            print_(na, ty, ta, flag)
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class ActionRecordFlag:
+    exists: bool
+    should_exist: bool
 
-    return record_printer
+
+class ReportPrinter:
+    @abc.abstractmethod
+    def print_title(self, *values: object) -> None: ...
+
+    @abc.abstractmethod
+    def print_section(self, *values: object) -> None: ...
+
+    @abc.abstractmethod
+    def print_record(
+        self, record: DnsRecord, flag: ActionRecordFlag | None = None
+    ) -> None: ...
+
+    @abc.abstractmethod
+    def print_blank(self) -> None: ...
+
+
+class PlainReportPrinter(ReportPrinter):
+    def __init__(
+        self, name_width: int, type_width=6, target_width=40, print_=print
+    ) -> None:
+        super().__init__()
+        self.name_width = int(name_width)
+        self.type_width = int(type_width)
+        self.target_width = int(target_width)
+        self.print_ = print_
+
+    def print_title(self, *values: object) -> None:
+        self.print_("#", *values)
+
+    def print_section(self, *values: object) -> None:
+        self.print_("##", *values)
+
+    def print_record(
+        self,
+        record: DnsRecord,
+        flag: ActionRecordFlag | None = None,
+        concise=False,
+    ) -> None:
+        na = str(record.name).rjust(self.name_width)
+        ty = record.type_.name.upper().ljust(self.type_width)
+        ta = record.target.ljust(self.target_width)
+        if flag is None:
+            self.print_(na, ty, ta)
+        else:
+            if concise:
+                fl = "??"
+                if flag.exists:
+                    if flag.should_exist:
+                        fl = "oo"
+                    else:
+                        fl = "--"
+                else:
+                    if flag.should_exist:
+                        fl = "++"
+                    else:
+                        fl = ";;"
+            else:
+                if flag.exists:
+                    if flag.should_exist:
+                        fl = ".. do not remove"
+                    else:
+                        fl = "REMOVE"
+                else:
+                    if flag.should_exist:
+                        fl = "ADD"
+                    else:
+                        fl = ".. do not add"
+                fl = "# " + fl
+            self.print_(na, ty, ta, fl)
+
+    def print_blank(self) -> None:
+        self.print_()
+
+
+class HtmlReportPrinter(ReportPrinter):
+    def __init__(self, out: pathlib.Path) -> None:
+        super().__init__()
+        self.out = pathlib.Path(out)
+
+
+class ReportPrinterGroup(ReportPrinter):
+    def __init__(self, *printers: ReportPrinter) -> None:
+        super().__init__()
+        self.printers = list(printers)
+
+    def print_section(self, *values: object) -> None:
+        for p in self.printers:
+            p.print_section(*values)
+
+    def print_record(
+        self,
+        record: DnsRecord,
+        flag: ActionRecordFlag | None = None,
+    ) -> None:
+        for p in self.printers:
+            p.print_record(record, flag=flag)
+
+    def print_blank(self) -> None:
+        for p in self.printers:
+            p.print_blank()
 
 
 def main():
     configfile = pathlib.Path(sys.argv[1])
+    statedir = pathlib.Path(configfile.name.removesuffix(".json") + "-state")
+    statedir.mkdir(exist_ok=True)
     for domain in load_domains_config_from_json(configfile):
-        print("#", "Domain:", domain.dns_name, domain.domain_guid)
         adrtmbn = get_all_dns_records_that_might_be_needed(domain)
         existing_name_to_type_to_record_data_list = (
             resolve_name_to_type_to_record_data_list(
@@ -667,12 +762,15 @@ def main():
                     if r[i] == testcase[i]:
                         print(testcase == r, r)
             raise SystemExit
-        record_printer = make_record_printer(
-            1 + max([len(str(r.name)) for r in adrtmbn.record_to_server.keys()])
+        printer = ReportPrinterGroup(
+            PlainReportPrinter(
+                1 + max([len(str(r.name)) for r in adrtmbn.record_to_server.keys()])
+            ),
+            HtmlReportPrinter(statedir / ("foo.." + domain.dns_name + "..html")),
         )
+        printer.print_title("Domain:", domain.dns_name, domain.domain_guid)
         for server, action_to_records in adrtmbn.server_to_action_to_records.items():
-            print(
-                "##",
+            printer.print_section(
                 server.pending_action.name,
                 "Server:",
                 server.name,
@@ -693,18 +791,19 @@ def main():
                             record.name, {}
                         ).get(record.type_, [])
                     )
-                    record_printer(
-                        record, flag(exists=exists, should_exist=should_exist)
+                    printer.print_record(
+                        record,
+                        ActionRecordFlag(exists=exists, should_exist=should_exist),
                     )
                     if exists and not should_exist:
                         to_be_removed.append(record)
                     elif should_exist and not exists:
                         to_be_added.append(record)
-        print()
-        print("## All records that might be needed")
+        printer.print_blank()
+        printer.print_section("All records that might be needed")
         only_should_exist_records: list[DnsRecord] = []
         only_name_records_with_flags_where_any_change_needed: dict[
-            DnsName, list[tuple[DnsRecord, str]]
+            DnsName, list[tuple[DnsRecord, ActionRecordFlag]]
         ] = {}
         for name, records in sorted(adrtmbn.name_to_records.items()):
             possible_types = {r.type_ for r in records}
@@ -718,70 +817,43 @@ def main():
                 name, {}
             ).get(possible_type, [])
             any_change_needed = False
-            records_with_flags = []
+            records_with_flags: list[tuple[DnsRecord, ActionRecordFlag]] = []
             for record in sorted(records):
-                exists = record.data in existing_targets
-                should_exist = record.action.should_exist()
-                flag_for_record = flag(exists=exists, should_exist=should_exist)
-                record_printer(record, flag_for_record)
-                if should_exist:
+                flag_for_record = ActionRecordFlag(
+                    exists=record.data in existing_targets,
+                    should_exist=record.action.should_exist(),
+                )
+                printer.print_record(record, flag_for_record)
+                if flag_for_record.should_exist:
                     only_should_exist_records.append(record)
-                if exists != should_exist:
+                if flag_for_record.exists != flag_for_record.should_exist:
                     any_change_needed = True
                     records_with_flags.append((record, flag_for_record))
             if any_change_needed:
                 only_name_records_with_flags_where_any_change_needed[name] = (
                     records_with_flags
                 )
-            print()
-        print()
-        print("## Only the records that should exist")
+            printer.print_blank()
+        printer.print_blank()
+        printer.print_section("Only the records that should exist")
         for r in sorted(only_should_exist_records):
-            record_printer(r, None)
-        print()
-        print("## Only changes that are needed")
+            printer.print_record(r)
+        printer.print_blank()
+        printer.print_section("Only changes that are needed")
         for name, records_with_flags in sorted(
             only_name_records_with_flags_where_any_change_needed.items()
         ):
             for record, flag_for_record in records_with_flags:
-                record_printer(record, flag_for_record)
-            print()
-        print()
+                printer.print_record(record, flag_for_record)
+            printer.print_blank()
+        printer.print_blank()
         if existing_but_not_expected:
-            print("## Existing but not expected")
+            printer.print_section("Existing but not expected")
             for n, t, d in sorted(existing_but_not_expected):
-                record_printer(
-                    DnsRecord(name=n, type_=t, data=d, action=PendingAction.KEEP), None
+                printer.print_record(
+                    DnsRecord(name=n, type_=t, data=d, action=PendingAction.KEEP)
                 )
-            print()
-
-
-def flag(exists: bool, should_exist: bool, concise=False) -> str:
-    if concise:
-        flag = "??"
-        if exists:
-            if should_exist:
-                flag = "oo"
-            else:
-                flag = "--"
-        else:
-            if should_exist:
-                flag = "++"
-            else:
-                flag = ";;"
-    else:
-        if exists:
-            if should_exist:
-                flag = ".. do not remove"
-            else:
-                flag = "REMOVE"
-        else:
-            if should_exist:
-                flag = "ADD"
-            else:
-                flag = ".. do not add"
-        flag = "# " + flag
-    return flag
+            printer.print_blank()
 
 
 if __name__ == "__main__":
