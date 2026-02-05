@@ -1,0 +1,20 @@
+td:nth-child(1) {
+    text-align: right;
+    font-family: monospace;
+}
+
+td:nth-child(3) {
+    font-family: monospace;
+}
+
+.record-does-not-exist {
+    background-color: lightgray;
+}
+
+.add-record {
+    background-color: yellow;
+}
+
+.remove-record {
+    background-color: cyan;
+}

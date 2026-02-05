@@ -8,9 +8,11 @@ import functools
 import ipaddress
 import json
 import pathlib
+import shutil
 import sys
 import typing
 import uuid
+import xml.etree.ElementTree as ET
 
 import dataclasses_json
 import dns.name
@@ -626,6 +628,15 @@ class ActionRecordFlag:
     exists: bool
     should_exist: bool
 
+    def labels(self) -> list[str]:
+        return [
+            "record-" + s
+            for s in [
+                "exists" if self.exists else "does-not-exist",
+                "should-exist" if self.should_exist else "should-not-exist",
+            ]
+        ]
+
 
 class ReportPrinter:
     @abc.abstractmethod
@@ -705,12 +716,90 @@ class HtmlReportPrinter(ReportPrinter):
     def __init__(self, out: pathlib.Path) -> None:
         super().__init__()
         self.out = pathlib.Path(out)
+        self.outf = self.out.open("w", encoding="utf8")
+
+        css = self.out.with_suffix(".css")
+        if not css.exists():
+            csstemplate = pathlib.Path(__file__).with_suffix(".css")
+            shutil.copy2(csstemplate, css)
+
+        self.html = ET.Element("html", lang="en")
+        self.head = subel(self.html, "head")
+        _ = subel(self.head, "link", rel="stylesheet", href=css.name)
+        self.body = subel(self.html, "body")
+        self.section_text: str | None = None
+        self.section_tbody: ET.Element | None = None
+
+    def print_title(self, *values: object) -> None:
+        text = glom(*values)
+        _ = subel(self.head, "title", text)
+        _ = subel(self.body, "h1", text)
+
+    def print_section(self, *values: object) -> None:
+        text = glom(*values)
+        _ = subel(self.body, "h2", text)
+        self.section_text = text
+        self.section_tbody = None
+
+    def print_record(
+        self,
+        record: DnsRecord,
+        flag: ActionRecordFlag | None = None,
+    ) -> None:
+        kvlist = [
+            ("Name", str(record.name)),
+            ("Type", record.type_.name.upper()),
+            ("Target", record.target),
+        ]
+        attrib = {}
+        if flag is not None:
+            labels = flag.labels()
+            if flag.exists:
+                if flag.should_exist:
+                    action = "(do not remove)"
+                else:
+                    action = "REMOVE"
+                    labels.append("remove-record")
+            else:
+                if flag.should_exist:
+                    action = "ADD"
+                    labels.append("add-record")
+                else:
+                    action = "(do not add)"
+            attrib["class"] = " ".join(labels)
+            kvlist.append(("Action", action))
+        if self.section_tbody is None:
+            table = subel(self.body, "table")
+            if self.section_text is not None:
+                _ = subel(table, "caption", self.section_text)
+            thead = subel(table, "thead")
+            tr = subel(thead, "tr")
+            for k, _ in kvlist:
+                _ = subel(tr, "th", k)
+            self.section_tbody = subel(table, "tbody")
+        tr = subel(self.section_tbody, "tr", attrib=attrib)
+        for _, v in kvlist:
+            _ = subel(tr, "td", v)
+
+    def __del__(self):
+        ET.indent(self.html)
+        contents = (
+            "<!doctype html>\n"
+            + ET.tostring(self.html, encoding="unicode", method="html")
+            + "\n"
+        )
+        self.outf.write(contents)
+        self.outf.close()
 
 
 class ReportPrinterGroup(ReportPrinter):
     def __init__(self, *printers: ReportPrinter) -> None:
         super().__init__()
         self.printers = list(printers)
+
+    def print_title(self, *values: object) -> None:
+        for p in self.printers:
+            p.print_title(*values)
 
     def print_section(self, *values: object) -> None:
         for p in self.printers:
@@ -727,6 +816,24 @@ class ReportPrinterGroup(ReportPrinter):
     def print_blank(self) -> None:
         for p in self.printers:
             p.print_blank()
+
+
+def glom(*values: object, sep: str = " ") -> str:
+    return sep.join([s for s in [str(v) for v in values if v is not None] if s])
+
+
+def subel(
+    parent: ET.Element,
+    tag: str,
+    text: str | None = None,
+    /,
+    attrib: dict[str, str] = {},
+    **extra,
+) -> ET.Element:
+    el = ET.SubElement(parent, tag, attrib, **extra)
+    if text is not None:
+        el.text = text
+    return el
 
 
 def main():
@@ -766,7 +873,9 @@ def main():
             PlainReportPrinter(
                 1 + max([len(str(r.name)) for r in adrtmbn.record_to_server.keys()])
             ),
-            HtmlReportPrinter(statedir / ("foo.." + domain.dns_name + "..html")),
+            HtmlReportPrinter(
+                statedir / ("DNS records for domain - " + domain.dns_name + ".html")
+            ),
         )
         printer.print_title("Domain:", domain.dns_name, domain.domain_guid)
         for server, action_to_records in adrtmbn.server_to_action_to_records.items():
