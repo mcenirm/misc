@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import argparse
 import collections
 import html.parser
 import pathlib
 import sys
 import urllib.parse
 
+import requests
+
 try:
     import requests_cache
 
-    Session = requests_cache.CachedSession
+    _Session = requests_cache.CachedSession
 except:
-    import requests
+    _Session = requests.Session
 
-    Session = requests.Session
 
 # HTML attributes that carry resource URLs, keyed by tag name
 _LINK_ATTRS: dict[str, str] = {
@@ -77,19 +79,19 @@ def save_response(dest: pathlib.Path, url: str, content: bytes) -> pathlib.Path:
     return local
 
 
-def main():
-    if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <url-list-file> <destination-dir>", file=sys.stderr)
-        sys.exit(1)
-
-    dest = pathlib.Path(sys.argv[2])
-    session = Session()
+def freeze_dry(
+    url_list_file: pathlib.Path,
+    dest: pathlib.Path,
+    session: requests.Session | None = None,
+):
+    url_list_file = pathlib.Path(url_list_file)
+    dest = pathlib.Path(dest)
+    if session is None:
+        session = _Session()
 
     seed_urls = [
         line
-        for line in [
-            line.strip() for line in pathlib.Path(sys.argv[1]).read_text().splitlines()
-        ]
+        for line in [line.strip() for line in url_list_file.read_text().splitlines()]
         if line and not line.startswith("#")
     ]
 
@@ -104,7 +106,9 @@ def main():
 
         print("*", repr(u))
         response = session.get(u, allow_redirects=False)
-        print(f"  Status: {response.status_code}  Content-Length: {len(response.content)}")
+        print(
+            f"  Status: {response.status_code}  Content-Length: {len(response.content)}"
+        )
         local = save_response(dest, u, response.content)
         print(f"  Saved:  {local}")
 
@@ -112,13 +116,42 @@ def main():
         if "text/html" in content_type:
             links = extract_links(u, response.text)
             new_links = [
-                link for link in links
-                if link not in visited and any(same_origin(seed, link) for seed in seed_urls)
+                link
+                for link in links
+                if link not in visited
+                and any(same_origin(seed, link) for seed in seed_urls)
             ]
             if new_links:
                 print(f"  Queued: {len(new_links)} new link(s)")
             queue.extend(new_links)
 
 
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ud = ap.add_argument("--update-destination", action="store_true")
+    ulf = ap.add_argument("url-list-file")
+    dd = ap.add_argument("destination-dir")
+
+    args: dict[str, str] = vars(ap.parse_args())
+    update_destination = args[ud.dest]
+    url_list_file = pathlib.Path(args[ulf.dest])
+    destination_dir = pathlib.Path(args[dd.dest])
+
+    if destination_dir.exists() and not update_destination:
+        print(f"Destination exists, aborting: {destination_dir}", file=sys.stderr)
+        return 1
+
+    try:
+        freeze_dry(url_list_file, destination_dir)
+        return 0
+    except (
+        FileNotFoundError,
+        requests.exceptions.RequestException,
+    ) as e:
+        print(e)
+
+    return 1
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
