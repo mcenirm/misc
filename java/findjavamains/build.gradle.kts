@@ -1,6 +1,7 @@
 plugins {
     application
-    id("com.gradleup.shadow") version "8.3.6"
+    id("com.gradleup.shadow") version "9.+"
+    // id("com.github.ben-manes.versions") version "0.+"
 }
 
 repositories {
@@ -8,12 +9,12 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.javaparser:javaparser-core:3.25.5")
+    implementation("com.github.javaparser:javaparser-core:3.+")
 }
 
 java {
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(8))
+        languageVersion.set(JavaLanguageVersion.of(25))
     }
 }
 
