@@ -1,144 +1,223 @@
-$DataFileName = 'LocalRolesAndPeople.psd1'
 
-$DataPath = $null
-foreach ($d in $PWD, $PSScriptRoot) {
-    $p = Join-Path -Path $d -ChildPath $DataFileName
-    if (Test-Path -LiteralPath $p) {
-        $DataPath = $p
-        break
-    }
-}
-if ($null -eq $DataPath) {
+using namespace System.Collections.Generic
+
+
+[CmdletBinding()]
+param (
+    [Parameter(Mandatory)]
+    [string]
+    $PeopleCsvPath,
+
+    [Parameter(Mandatory)]
+    [string]
+    $RolesDataPath
+)
+
+
+if (-not (Test-Path $RolesDataPath)) {
     Write-Warning @"
-The data file '${DataFileName}' should have contents similar to:
+The roles data file '$RolesDataPath' should have contents similar to:
 ----------
 @{
-    Roles  = @{
-        Regular = @{
-            Groups         = @(
-                'Users'
-                'Project A'
-            )
-            UserNamePrefix = ''
-            FullNameSuffix = ''
-        }
-        Admin   = @{
-            Groups         = @(
-                'Administrators'
-            )
-            UserNamePrefix = 'admin-'
-            FullNameSuffix = ' (admin)'
-        }
+    Damage     = @{
+        Groups         = @('Users', 'Lancers')
+        UserNamePrefix = ''
+        FullNameSuffix = ''
     }
-    People = @{
-        jonesj = @{
-            Roles    = @(
-                'Admin'
-                'Backup'
-            )
-            FullName = 'Jane Jones'
-        }
-        smithj = @{
-            Roles    = @(
-                'Regular'
-                'Audit'
-            )
-            FullName = 'John Smith'
-        }
+    Protection = @{
+        Groups         = @('Users', 'Tanks')
+        UserNamePrefix = 'prot-'
+        FullNameSuffix = ' (protection)'
+    }
+    Healing    = @{
+        Groups         = @('Users', 'Healers')
+        UserNamePrefix = 'heal-'
+        FullNameSuffix = ' (healer)'
+    }
+    Admin      = @{
+        Groups         = @('Administrators', 'Admins')
+        UserNamePrefix = 'admin-'
+        FullNameSuffix = ' (admin)'
+        ImpliedRoles   = @('BackupOp')
+    }
+    BackupOp   = @{
+        Groups         = @('Users', 'Backup Operators')
+        UserNamePrefix = 'backup-'
+        FullNameSuffix = ' (backup)'
+        ImpliedRoles   = @('BackupOp')
     }
 }
 ----------
 "@
-    Write-Error "Could not find data file: ${DataFileName}" -ErrorAction Stop
+    Write-Error "Could not find roles data file: ${RolesDataPath}" -ErrorAction Stop
 }
-$Data = Import-PowerShellDataFile -LiteralPath $DataPath
+$RolesData = Import-PowerShellDataFile -LiteralPath $RolesDataPath -ErrorAction Stop
 
-foreach ($Role in $Data.Roles.GetEnumerator()) {
-    foreach ($GroupName in $Role.Groups) {
-        $ExistingLocalGroup = Get-LocalGroup -Name $GroupName -ErrorAction SilentlyContinue
-        if ($null -eq $ExistingLocalGroup) {
-            Write-Output "New-LocalGroup -Name '${GroupName}' -Verbose"
+
+if (-not (Test-Path $PeopleCsvPath)) {
+    Write-Warning @"
+The people CSV file '$PeopleCsvPath' should have contents similar to:
+----------
+UserName,FullName,PrimaryRole,Healing
+reda,Alice Red,Damage,FALSE
+greenb,Bob Green,Damage,TRUE
+yellowc,Carol Yellow,Protection,FALSE
+blued,Dan Blue,Damage,FALSE
+orangee,Eve Orange,Damage,FALSE
+purplef,Frank Purple,Protection,TRUE
+grayg,Grace Gray,Admin,TRUE
+----------
+"@
+    Write-Error "Could not find people CSV file: ${PeopleCsvPath}" -ErrorAction Stop
+}
+$PeopleData = Import-Csv -Path $PeopleCsvPath -ErrorAction Stop
+
+
+class RoleDefinition {
+    $RoleName = ''
+    $GroupNames = [SortedSet[string]]::new()
+    $UserNamePrefix = ''
+    $FullNameSuffix = ''
+    $ImpliedRoleNames = [SortedSet[string]]::new()
+}
+
+
+class RoleDefinitionCollection {
+    [SortedDictionary[string, RoleDefinition]]$Roles
+    [SortedSet[string]]$GroupNames
+
+    RoleDefinitionCollection([hashtable]$RolesData) {
+        $this.Roles = [SortedDictionary[string, RoleDefinition]]::new()
+        $this.GroupNames = [SortedSet[string]]::new()
+
+        $unresolvedRoleNames = [SortedSet[string]]::new()
+
+        foreach ($roleEntry in $RolesData.GetEnumerator()) {
+            $roleName = $roleEntry.Key
+            $role = $roleEntry.Value
+
+            $def = [RoleDefinition]::new()
+            $def.RoleName = $roleName
+            if ($null -ne $role.Groups) {
+                $def.GroupNames.UnionWith([string[]]$role.Groups)
+                $this.GroupNames.UnionWith($def.GroupNames)
+            }
+            if ($null -ne $role.UserNamePrefix) {
+                $def.UserNamePrefix = $role.UserNamePrefix
+            }
+            if ($null -ne $role.FullNameSuffix) {
+                $def.FullNameSuffix = $role.FullNameSuffix
+            }
+            if ($null -ne $role.ImpliedRoles) {
+                $def.ImpliedRoleNames.UnionWith([string[]]$role.ImpliedRoles)
+                $unresolvedRoleNames.UnionWith($def.ImpliedRoleNames)
+            }
+            $this.Roles.Add($roleName, $def)
         }
+        
+        $unresolvedRoleNames.ExceptWith($this.Roles.Keys)
+        if ($unresolvedRoleNames.Count -gt 0) {
+            Write-Error "unresolved role names: $($unresolvedRoleNames -join ', ')" -ErrorAction Stop
+        }
+    }
+
+    [List[RoleDefinition]] RecurseImpliedRoles([IEnumerable[string]]$RoleNames) {
+        # start with what we're given
+        $names = [SortedSet[string]]::new()
+        $names.UnionWith($RoleNames)
+        # ... and add them to the queue
+        $q = [List[string]]::new()
+        $q.AddRange($names)
+        while ($q.Count -gt 0) {
+            # pop the first name, and get the role def
+            $n = $q[0]
+            $q.RemoveAt(0)
+            [RoleDefinition]$r = $this.Roles[$n]
+            # get the implied roles and add them to the set of names
+            $implieds = [SortedSet[string]]::new()
+            $implieds.UnionWith($r.ImpliedRoleNames)
+            $names.UnionWith($implieds)
+            # subtract the ones we've already seen
+            $implieds.ExceptWith($names)
+            # and the leftovers to the queue
+            $q.AddRange($implieds)
+        }
+        # return the named role defs
+        $rv = [List[RoleDefinition]]::new()
+        foreach ($n in $names) {
+            $rv.Add($this.Roles[$n]) | Out-Null
+        }
+        return $rv
     }
 }
 
-# TODO Check for any unspecified but existing accounts that:
-#      * start with a role username prefix
-#      * end with a person username
-# TODO Decide if there should be a simple warning vs commands for removal
 
-$WrotePasswordCommand = $false
-foreach ($Person in $Data.People.GetEnumerator()) {
-    foreach ($RoleName in $Person.Value.Roles) {
-        $Role = $Data.Roles[$RoleName]
-        $UserName = $Role.UserNamePrefix + $Person.Key
-        $FullName = $Person.Value.FullName + $Role.FullNameSuffix
-        $ExistingLocalUser = Get-LocalUser -Name $UserName -ErrorAction SilentlyContinue
-        if ($null -eq $ExistingLocalUser) {
-            if (-not $WrotePasswordCommand) {
-                Write-Output @'
-#
-# Use one of the following commands to set the initial password.
-#
-# Manual:
-#
-#  $PasswordSecureString = Read-Host 'Enter password' -AsSecureString
-#
-# Unrecoverable random password:
-#
-#  $PasswordSecureString = [System.Web.Security.Membership]::GeneratePassword(16,4) | ConvertTo-SecureString -AsPlainText -Force
-#
-'@
-                $WrotePasswordCommand = $true
-            }
-            Write-Output ''
-            Write-Output "New-LocalUser           -Verbose -Name   '${UserName}' -FullName '${FullName}' -Password `$PasswordSecureString"
-            foreach ($GroupName in $Role.Groups) {
-                Write-Output "Add-LocalGroupMember    -Verbose -Member '${UserName}' -Group '${GroupName}'"
+class Person {
+    $UserName = ''
+    $FullName = ''
+    $RoleNames = [SortedSet[string]]::new()
+}
+
+
+$RoleCollection = [RoleDefinitionCollection]::new($RolesData)
+
+$People = $PeopleData | ForEach-Object {
+    $row = $_
+    $person = [Person]::new()
+    foreach ($prop in $row.psobject.Properties) {
+        $k = $prop.Name.Trim()
+        $v = $prop.Value.Trim()
+        try {
+            # Try to assign based on class fields
+            $person.$k = $v
+        }
+        catch {
+            # Otherwise, assume role names
+            switch ($k) {
+                'Surname' { }
+                'GivenName' { }
+                { $k -eq 'PrimaryRole' } {
+                    $person.RoleNames.Add($v) | Out-Null
+                }
+                { $v -eq 'TRUE' -or $v -eq $k } {
+                    $person.RoleNames.Add($k) | Out-Null
+                }
             }
         }
-        else {
-            $SetArgs = @{}
-            if ($ExistingLocalUser.FullName -cne $FullName) {
-                $SetArgs.FullName = $FullName
-            }
-            if ($SetArgs.Count -gt 0) {
-                $SetCmd = "Set-LocalUser           -Verbose -Name   '${UserName}'"
-                foreach ($SetArg in $SetArgs.GetEnumerator()) {
-                    $SetCmd += " -$(${SetArg}.Key) '$(${SetArg}.Value.ToString())'"
-                }
-            }
-            $NeedToRemoveUserFromGroups = @{}
-            Get-LocalGroup | ForEach-Object {
-                $Group = $_
-                Get-LocalGroupMember -Group $Group | ForEach-Object {
-                    $Member = $_
-                    if ($Member.SID -eq $ExistingLocalUser.SID) {
-                        $NeedToRemoveUserFromGroups[$Group.Name] = $true
-                    }
-                }
-            }
-            $NeedToAddUserToGroups = @{}
-            foreach ($GroupName in $Role.Groups) {
-                if ($NeedToRemoveUserFromGroups.ContainsKey($GroupName)) {
-                    $NeedToRemoveUserFromGroups.Remove($GroupName)
-                }
-                else {
-                    $NeedToAddUserToGroups[$GroupName] = $true
-                }
-            }
-            if (($SetArgs.Count -gt 0) -or ($NeedToRemoveUserFromGroups.Count -gt 0) -or ($NeedToAddUserToGroups.Count -gt 0)) {
-                Write-Output ''
-            }
-            if ($SetArgs.Count -gt 0) {
-                Write-Output $SetCmd
-            }
-            foreach ($Group in $NeedToRemoveUserFromGroups.GetEnumerator()) {
-                Write-Output "Remove-LocalGroupMember -Verbose -Member '${UserName}' -Name '$(${Group}.Key)'"
-            }
-            foreach ($Group in $NeedToAddUserToGroups.GetEnumerator()) {
-                Write-Output "Add-LocalGroupMember    -Verbose -Member '${UserName}' -Name '$(${Group}.Key)'"
-            }
+    }
+    $person
+}
+
+$unresolvedRoleNames = [SortedSet[string]]::new()
+foreach ($person in $People) {
+    $unresolvedRoleNames.UnionWith($person.RoleNames)
+}
+$unresolvedRoleNames.ExceptWith($RoleCollection.Roles.Keys)
+if ($unresolvedRoleNames.Count -gt 0) {
+    Write-Error "unresolved role names: $($unresolvedRoleNames -join ', ')" -ErrorAction Stop
+}
+
+$unresolvedGroupNames = [SortedSet[string]]::new()
+$unresolvedGroupNames.UnionWith($RoleCollection.GroupNames)
+foreach ($person in $People) {
+    $roleNames = ($RoleCollection.RecurseImpliedRoles($person.RoleNames)).RoleName
+    foreach ($roleName in $roleNames) {
+        $roleDef = $RoleCollection.Roles[$roleName]
+        $userName = $roleDef.UserNamePrefix + $person.UserName
+        $userFullName = $person.FullName + $roleDef.FullNameSuffix
+        $groups = $roleDef.GroupNames -join '; '
+        [pscustomobject]@{
+            Name     = $userName
+            FullName = $userFullName
+            Groups   = $groups
         }
+        $unresolvedGroupNames.ExceptWith($roleDef.GroupNames)
+    }
+}
+foreach ($groupName in $unresolvedGroupNames) {
+    [pscustomobject]@{
+        Name     = '--'
+        FullName = '--'
+        Groups   = $groupName
     }
 }

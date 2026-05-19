@@ -1,0 +1,8 @@
+UserName,FullName,PrimaryRole,Healing
+reda,Alice Red,Damage,FALSE
+greenb,Bob Green,Damage,TRUE
+yellowc,Carol Yellow,Protection,FALSE
+blued,Dan Blue,Damage,FALSE
+orangee,Eve Orange,Damage,FALSE
+purplef,Frank Purple,Protection,TRUE
+grayg,Grace Gray,Admin,TRUE
