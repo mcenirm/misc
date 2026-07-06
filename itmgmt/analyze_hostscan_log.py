@@ -11,7 +11,19 @@ import pathlib
 import platform
 import re
 import sys
+import traceback
 import typing
+
+LOG_FILE_PAT = re.compile(r"(?P<base>(cscan|libcsd)\.log)(\.\d+)?$")
+LOG_ENTRY_PATTERN = re.compile(
+    r"^\[(?P<timestamp>\w\w\w \w\w\w \d\d \d\d:\d\d:\d\d\.\d\d\d \d\d\d\d)\]"
+    + r"\[(?P<module>\w+)\]"
+    + r"Function: (?P<function>.*?) Thread Id: (?P<thread_id>.*?)"
+    + r" File: (?P<srcfile>.*?) Line: (?P<srcline>.*?)"
+    + r" Level: (?P<level>.*?)"
+    + r" :(?:: )?",
+    re.MULTILINE,
+)
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -21,8 +33,8 @@ class LogEntry:
     module: str
     function: str
     thread_id: str
-    file: str
-    line: str
+    srcfile: str
+    srcline: str
     level: str
     message: str
     labels: set[str] = dataclasses.field(default_factory=set)
@@ -70,8 +82,8 @@ class LogEntry:
                     "found",
                     "found ",
                     "",
-                    r"(?P<n>[^(]+)( \()(?P<v>[^)]*)(\))",
-                    r"\1\2…\4",
+                    r"(?P<n>[^()]+)(?: \()(?P<v>[^()]*(?: \([^())]*\))?)(?:\))",
+                    r"\1 (…)",
                 ),
                 (
                     "found",
@@ -112,6 +124,22 @@ class LogEntry:
                     + ew
                 )
                 if mwp != self.message:
+                    if (
+                        label == "found"
+                        and sw == "found "
+                        and not (
+                            mwp
+                            in {
+                                "found open port (…)",
+                                "found MAC addr (…)",
+                            }
+                            or mwp.startswith("found firewall ==> (…) ")
+                            or mwp.startswith("found antimalware ==> (…) ")
+                        )
+                    ):
+                        raise NotImplementedError(
+                            label, sw, ew, pat, repl, self.message, mwp
+                        )
                     break
         else:
             return self.message
@@ -133,23 +161,6 @@ class LogEntry:
     @functools.cached_property
     def message_without_digits(self) -> str:
         return re.sub(r"\d+", "·", self.message)
-
-    @classmethod
-    def from_line(cls, linenum: int, line: str) -> typing.Self | None:
-        m_line = re.compile(
-            r"\[(?P<timestamp>[^]]+)\]"
-            + r"\[(?P<module>[^]]+)\]"
-            + r"Function: (?P<function>.*?)"
-            + r" Thread Id: (?P<thread_id>.*?)"
-            + r" File: (?P<file>.*?)"
-            + r" Line: (?P<line>.*?)"
-            + r" Level: (?P<level>.*?)"
-            + r" :(?P<message>.*)"
-        ).match(line)
-        if m_line:
-            return cls(linenum=linenum, **m_line.groupdict())
-        else:
-            return None
 
 
 class CodeModule:
@@ -201,24 +212,9 @@ class Session:
         return None
 
 
-LOG_FILE_PAT = re.compile(r"(?P<base>(cscan|libcsd)\.log)(\.\d+)?$")
-
-
 def analyze_hostscan_log(logpath: pathlib.Path):
     logpath = pathlib.Path(logpath)
-    lines = logpath.read_text().splitlines()
-
-    entries: list[LogEntry] = []
-
-    for linenum, line in enumerate(lines, 1):
-        entry = LogEntry.from_line(linenum, line)
-        if entry:
-            entries.append(entry)
-        else:
-            raise ValueError(
-                "Unrecognized line", dict(logpath=logpath, linenum=linenum, line=line)
-            )
-
+    entries = parse_log_file(logpath)
     if not entries:
         return
 
@@ -231,7 +227,7 @@ def analyze_hostscan_log(logpath: pathlib.Path):
     csvwriter = None
     hello = None
     threads = None
-    founds: dict[str, set[str] | None] = {}
+    founds: dict[str, set[str | int | float] | None] = {}
     for entry in entries:
         if csvwriter is None and entry.message != "hello":
             raise ValueError("expected first entry to be hello", dict(entry=entry))
@@ -241,7 +237,8 @@ def analyze_hostscan_log(logpath: pathlib.Path):
                     raise ValueError(
                         "hello mismatch", dict(previous=hello, current=entry)
                     )
-                csvout.close()
+                if csvout:
+                    csvout.close()
             hello = entry
             threads = {entry.thread_id: "<HELLO>"}
             csvpath = logpath.parent / (
@@ -266,8 +263,10 @@ def analyze_hostscan_log(logpath: pathlib.Path):
                     "message",
                 ]
             )
+        if csvwriter is None:
+            raise AssertionError("csvwriter should exist after hello")
 
-        if entry.thread_id not in threads:
+        if threads and entry.thread_id not in threads:
             threads[entry.thread_id] = f"<{len(threads)}>"
 
         entry.message_without_parameters
@@ -312,8 +311,8 @@ def analyze_hostscan_log(logpath: pathlib.Path):
                 # round_up_duration(entry.timestamp_dt - hello.timestamp_dt),
                 entry.module,
                 entry.function,
-                threads[entry.thread_id],
-                pathlib.Path(entry.file).name,
+                threads[entry.thread_id] if threads else "",
+                pathlib.Path(entry.srcfile).name,
                 entry.level,
                 entry.message_without_parameters,
             ]
@@ -339,6 +338,40 @@ def analyze_hostscan_log(logpath: pathlib.Path):
         csvout.close()
 
 
+def parse_log_file(
+    logpath: pathlib.Path,
+    _log_entry_pattern=LOG_ENTRY_PATTERN,
+) -> list[LogEntry]:
+
+    def _helper(linenum: int, message: str, mtch: re.Match) -> LogEntry:
+        return LogEntry(
+            linenum=linenum,
+            message=message,
+            **mtch.groupdict(),
+        )
+
+    log_text = logpath.read_text(encoding="utf-8")
+
+    # Find all positions where a log entry starts
+    if mtches := list(_log_entry_pattern.finditer(log_text)):
+        entries = []
+        linenum = 1
+        for i in range(len(mtches) - 1):
+            message = log_text[mtches[i].end() : mtches[i + 1].start()].removesuffix(
+                "\n"
+            )
+            entries.append(_helper(linenum=linenum, message=message, mtch=mtches[i]))
+            lines_in_message = 1 + message.count("\n")
+            linenum += lines_in_message
+        message = log_text[mtches[-1].end() :].removesuffix("\n")
+        entries.append(_helper(linenum=linenum, message=message, mtch=mtches[-1]))
+        return entries
+    else:
+        raise NotImplementedError(
+            logpath.name, log_text, "unable to find any log entries"
+        )
+
+
 def round_up_duration(dur: datetime.timedelta) -> int:
     secs = dur.total_seconds()
     for thresh in [1, 10, 60, 120, 300, 600, 1800, 3600]:
@@ -359,7 +392,7 @@ def default_hostscan_log_dir() -> pathlib.Path:
             / "log"
         )
     else:
-        return pathlib.Path(os.environ("HOME")) / ".cisco" / "hostscan" / "log"
+        return pathlib.Path(os.environ.get("HOME", "~")) / ".cisco" / "hostscan" / "log"
 
 
 def main():
@@ -392,4 +425,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except NotImplementedError as nie:
+        print(type(nie).__name__)
+        if nie.args:
+            for a in nie.args:
+                print("!!", repr(a)[:80])
+            print()
+        print(traceback.format_exception(nie)[-2])
