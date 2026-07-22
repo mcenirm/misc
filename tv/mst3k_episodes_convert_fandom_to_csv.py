@@ -12,6 +12,8 @@ import typing
 
 import bs4
 
+import frustra.cmds
+
 
 MST3K_EPISODES_FROM_FANDOM_URL = "https://mst3k.fandom.com/wiki/List_of_MST3K_Episodes"
 MST3K_EPISODES_FROM_FANDOM_HEADER_ORD_ID = "#"
@@ -279,32 +281,12 @@ def _get_bs4_path_with_class(elem: bs4.element.PageElement, sep="/") -> str:
     return sep.join(items)
 
 
-def _make_argument_parser_from_function(
-    f: collections.abc.Callable[..., typing.Any],
-) -> argparse.ArgumentParser:
-    s = inspect.signature(f)
-    h = typing.get_type_hints(f)
-    _ = h.pop("return", None)
-    ap = argparse.ArgumentParser(
-        description=f.__doc__,
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    for n, t in h.items():
-        opt = "--" + n.replace("_", "-")
-        kw = dict(type=t)
-        if s.parameters[n].default is not inspect.Parameter.empty:
-            kw["default"] = s.parameters[n].default
-            kw["help"] = n.replace("_", " ")
-        ap.add_argument(opt, **kw)
-    return ap
-
-
 class TODO(BaseException): ...
 
 
 def main():
     f = convert_fandom_html_to_csv
-    ap = _make_argument_parser_from_function(f)
+    ap = frustra.cmds.argument_parser_from_function(f)
     args = ap.parse_args().__dict__
     try:
         return f(**args)
