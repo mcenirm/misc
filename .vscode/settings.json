@@ -18,5 +18,32 @@
         "qualifyMembers"
     ],
     "java.gradle.buildServer.enabled": "on",
-    "java.import.generatesMetadataFilesAtProjectRoot": true
+    "java.import.generatesMetadataFilesAtProjectRoot": true,
+    "peacock.color": "#8ceaa6",
+    "workbench.colorCustomizations": {
+        "activityBar.activeBackground": "#b7f2c7",
+        "activityBar.background": "#b7f2c7",
+        "activityBar.foreground": "#15202b",
+        "activityBar.inactiveForeground": "#15202b99",
+        "activityBarBadge.background": "#ab93eb",
+        "activityBarBadge.foreground": "#15202b",
+        "activityBarTop.activeBackground": "#b7f2c7",
+        "activityBarTop.background": "#b7f2c7",
+        "activityBarTop.foreground": "#15202b",
+        "activityBarTop.inactiveForeground": "#15202b99",
+        "commandCenter.border": "#15202b99",
+        "commandCenter.foreground": "#15202b",
+        "sash.hoverBorder": "#b7f2c7",
+        "statusBar.background": "#8ceaa6",
+        "statusBar.debuggingBackground": "#8ceaa6",
+        "statusBar.debuggingForeground": "#15202b",
+        "statusBar.foreground": "#15202b",
+        "statusBarItem.hoverBackground": "#61e285",
+        "statusBarItem.remoteBackground": "#9778e6",
+        "statusBarItem.remoteForeground": "#15202b",
+        "titleBar.activeBackground": "#8ceaa6",
+        "titleBar.activeForeground": "#15202b",
+        "titleBar.inactiveBackground": "#8ceaa699",
+        "titleBar.inactiveForeground": "#15202b99"
+    }
 }
