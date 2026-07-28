@@ -4,6 +4,7 @@ import dataclasses
 import inspect
 import re
 import shlex
+import traceback
 import typing
 
 
@@ -92,3 +93,26 @@ def parse_shebang(line: str) -> ParsedShebangLine | None:
         )
     else:
         return None
+
+
+def meighn(
+    actual_function: collections.abc.Callable,
+    args: list[str] | None = None,
+):
+    ap = argument_parser_from_function(actual_function)
+    ns = ap.parse_args(args).__dict__
+    try:
+        return actual_function(**ns)
+    except NotImplementedError as e:
+        print(type(e).__name__)
+        for a in e.args:
+            r = a
+            if r is not None:
+                r = repr(r)
+                if "\n" in r:
+                    r = repr(str(a))
+                r = r[:80]
+            print(" ●", r)
+        print()
+        print(traceback.format_exception(e)[-2])
+        print()
