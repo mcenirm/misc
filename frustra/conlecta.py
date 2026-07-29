@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import collections.abc
 import typing
 
 
@@ -133,7 +134,75 @@ class AdHocEquivalenceClasses[_KT]:
         return newrep
 
 
+def iter_over_nested(
+    data: typing.Any,
+    keys: collections.abc.Sequence[
+        collections.abc.Hashable | typing.SupportsIndex | type[list]
+    ] = [],
+    skip_missing=True,
+) -> typing.Generator[typing.Any, None, None]:
+    """
+    Use the keys to navigate the data structure and yield the values that are found.
+
+    >>> data = {"a": [{"c": [1, 2, 3, 4]}]}
+    >>> list(iter_over_nested(data, ["a", 0, "c", 0]))
+    [1]
+    >>> list(iter_over_nested(data, ["a", 0, "c", slice(1, -1)]))
+    [2, 3]
+    >>> list(iter_over_nested(data, ["a", 0, "c", list]))
+    [1, 2, 3, 4]
+    >>> list(iter_over_nested(data, ["a", 0, "c"]))
+    [[1, 2, 3, 4]]
+
+    >>> data = [
+    ...     {"name": "Alice", "color": "blue"},
+    ...     {"name": "Bob", "color": "orange"},
+    ...     {"name": "Eve"},
+    ... ]
+    >>> list(iter_over_nested(data, [list, "name"]))
+    ['Alice', 'Bob', 'Eve']
+    >>> list(iter_over_nested(data, [list, "color"]))
+    ['blue', 'orange']
+    >>> list(iter_over_nested(data, [list, "color"], skip_missing=False))
+    Traceback (most recent call last):
+    ...
+    KeyError: 'color'
+
+    """
+
+    if keys:
+        key, rest = keys[0], keys[1:]
+        value_iter = None
+
+        if key is list:
+            value_iter = iter(data)
+        elif isinstance(key, slice):
+            value_iter = iter(data[key])
+        elif skip_missing:
+            try:
+                value_iter = iter([data[key]])
+            except LookupError:
+                value_iter = iter([])
+        else:
+            value_iter = iter([data[key]])
+
+        if value_iter is None:
+            raise NotImplementedError(
+                "unexpected key type",
+                type(key),
+                key,
+            )
+        for value in value_iter:
+            yield from iter_over_nested(
+                value,
+                rest,
+                skip_missing=skip_missing,
+            )
+    else:
+        yield data
+
+
 if __name__ == "__main__":
     import doctest
 
-    doctest.testmod()
+    doctest.testmod(optionflags=doctest.ELLIPSIS)
