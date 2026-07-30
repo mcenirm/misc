@@ -143,7 +143,7 @@ class AdHocEquivalenceClasses[_KT]:
 
 def iter_over_nested(
     data: typing.Any,
-    keys: collections.abc.Sequence[
+    keys: collections.abc.Iterable[
         collections.abc.Hashable | typing.SupportsIndex | type[list]
     ] = [],
     skip_missing=True,
@@ -177,6 +177,7 @@ def iter_over_nested(
 
     """
 
+    keys = list(keys)
     if keys:
         key, rest = keys[0], keys[1:]
         value_iter = None
