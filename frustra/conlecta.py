@@ -210,6 +210,35 @@ def iter_over_nested(
         yield data
 
 
+class SetishList[_T](list):
+    """
+    A list, with set-like .add() that does not add an object that is already in the list
+
+    >>> sl = SetishList([1, 2, 3])
+    >>> sl.add(1), sl
+    (False, [1, 2, 3])
+    >>> sl.add(2), sl
+    (False, [1, 2, 3])
+    >>> sl.add(4), sl
+    (True, [1, 2, 3, 4])
+
+    >>> sl.append(3), sl
+    (None, [1, 2, 3, 4, 3])
+    >>> sl.add(2.0), sl
+    (False, [1, 2, 3, 4, 3])
+    >>> sl.add((0.1 + 0.2) * 10.0), sl
+    (True, [1, 2, 3, 4, 3, 3.0000000000000004])
+
+    """
+
+    def add(self, obj: _T) -> bool:
+        if obj in self:
+            return False
+        else:
+            self.append(obj)
+            return True
+
+
 if __name__ == "__main__":
     import doctest
 
