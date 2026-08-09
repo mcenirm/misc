@@ -31,8 +31,8 @@ class defaultdict_where_factory_takes_missing_key_as_arg[_KT, _VT](dict[_KT, _VT
         return value
 
 
-class defaultdict_where_default_value_is_missing_key(
-    defaultdict_where_factory_takes_missing_key_as_arg
+class defaultdict_where_default_value_is_missing_key[_T](
+    defaultdict_where_factory_takes_missing_key_as_arg[_T, _T]
 ):
     """Acts like defaultdict but use key as the value"""
 
@@ -210,7 +210,7 @@ def iter_over_nested(
         yield data
 
 
-class SetishList[_T](list):
+class SetishList[_T](list[_T]):
     """
     A list, with set-like .add() that does not add an object that is already in the list
 
