@@ -281,29 +281,8 @@ def _get_bs4_path_with_class(elem: bs4.element.PageElement, sep="/") -> str:
     return sep.join(items)
 
 
-class TODO(BaseException): ...
-
-
-def main():
-    f = convert_fandom_html_to_csv
-    ap = frustra.cmds.argument_parser_from_function(f)
-    args = ap.parse_args().__dict__
-    try:
-        return f(**args)
-    except (TODO, NotImplementedError) as e:
-        print(type(e).__name__)
-        for a in e.args:
-            r = a
-            if r is not None:
-                r = repr(r)
-                if "\n" in r:
-                    r = repr(str(a))
-                r = r[:80]
-            print(" ●", r)
-        print()
-        print(traceback.format_exception(e)[-2])
-        print()
+class TODO(NotImplementedError): ...
 
 
 if __name__ == "__main__":
-    main()
+    frustra.cmds.meighn(convert_fandom_html_to_csv)
