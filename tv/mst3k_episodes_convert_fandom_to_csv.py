@@ -149,7 +149,13 @@ def read_episodes_from_fandom_html(
         for row_i, row_tag in enumerate(season.table.find_all("tr")):
             if row_i:
                 cell_tags = list(row_tag.find_all("td"))
-                cell_texts = [t.get_text(strip=False).strip() for t in cell_tags]
+                for t in cell_tags:
+                    for b in t.find_all("br"):
+                        b.replace_with("\u2424")
+                cell_texts = [
+                    t.get_text(strip=False).strip().replace("\u2424", "\n")
+                    for t in cell_tags
+                ]
                 if len(cell_tags) == len(header_texts):
                     if ep_kwargs:
                         yield Episode(**ep_kwargs)
