@@ -318,6 +318,43 @@ def PascalCase(s: str) -> str | None:
 
 
 @functools.cache
+def kebab_case(s: str) -> str | None:
+    """
+
+    >>> kebab_case(None)
+    >>> kebab_case("")
+    >>> kebab_case("    ")
+    >>> kebab_case("!@#$")
+    >>> kebab_case("23skidoo")
+    '23skidoo'
+    >>> kebab_case("hello")
+    'hello'
+    >>> kebab_case("Hello")
+    'hello'
+    >>> kebab_case("HELLO")
+    'hello'
+    >>> kebab_case("hello-world")
+    'hello-world'
+    >>> kebab_case("hello_world")
+    'hello-world'
+    >>> kebab_case("HelloWorld")
+    'hello-world'
+    >>> kebab_case("Hell0World")
+    'hell0-world'
+    >>> kebab_case("Hello World!")
+    'hello-world'
+    >>> kebab_case("Hello, World!")
+    'hello-world'
+    """
+
+    k = snake_case(s)
+    if k:
+        return k.replace("_", "-")
+    else:
+        return k
+
+
+@functools.cache
 def repr_str_with_double_quotes(s: str) -> str:
     r"""
 
