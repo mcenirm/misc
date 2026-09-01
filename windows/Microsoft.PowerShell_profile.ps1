@@ -4,3 +4,4 @@ function delldl { & dl --header 'user-agent: Chrome/1337' @args }
 function 7z { & "$env:ProgramFiles\7-Zip\7z.exe" @args }
 function wgup { & winget upgrade @args }
 function wgdl { & winget download --exact --architecture x64 --id $args[0] }
+function host { & Resolve-DnsName @args | Where-Object Section -eq Answer }
