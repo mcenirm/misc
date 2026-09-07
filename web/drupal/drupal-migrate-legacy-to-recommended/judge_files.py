@@ -6,6 +6,8 @@ import csv
 import dataclasses
 import datetime
 import difflib
+import fnmatch
+import glob
 import pathlib
 import sys
 import traceback
@@ -61,7 +63,8 @@ class Qualities:
     modules: bool | None = None
     themes: bool | None = None
     libraries: bool | None = None
-    site: str | None = None
+    unexpected: bool | None = None
+
     module: str | None = None
     theme: str | None = None
     library: str | None = None
@@ -105,6 +108,66 @@ class ValueJudgment(Qualities, SomethingThatHasARelativePath):
 class Classifier:
     def classify(self, relpath: str) -> Qualities:
         c = Qualities()
+        parts = relpath.split("/")
+        if not parts:
+            raise NotImplementedError(
+                "expected a relative path",
+                relpath,
+                type(self).__name__,
+            )
+        if parts[0] == "sites":
+            c.sites = True
+            if len(parts) > 2:
+                if parts[1] == "default":
+                    if len(parts) > 3:
+                        if parts[2] == "files":
+                            c.sites_files = True
+                        else:
+                            raise TODO(
+                                *parts,
+                                "sites default but not files",
+                            )
+                    elif parts[2] in {
+                        "settings.php",
+                    } or any(
+                        fnmatch.fnmatch(parts[2], pat)
+                        for pat in [
+                            "default.*.yml",
+                            "default.*.php",
+                        ]
+                    ):
+                        ...
+                    else:
+                        raise TODO(
+                            *parts,
+                            "sites default but no subdir?",
+                        )
+                else:
+                    raise NotImplementedError(
+                        "unexpected sites subdirectory",
+                        relpath,
+                    )
+        elif parts[0] == "core":
+            ...
+        elif parts[0] == "libraries":
+            ...
+        elif parts[0] == "modules":
+            ...
+        elif parts[0] == "profiles":
+            ...
+        elif parts[0] == "themes":
+            ...
+        elif parts[0] == "vendor":
+            ...
+        elif parts[0] in {
+            "images",
+            "jqueryFileTree",
+        }:
+            c.unexpected = True
+        elif len(parts) == 1:
+            pass
+        else:
+            raise TODO(*parts)
         return c
 
 
@@ -119,7 +182,7 @@ class RecommendedClassifier(Classifier):
         self.web_relative = str(web_relative).rstrip("/") + "/"
 
     def classify(self, relpath) -> Qualities:
-        c = super().classify(relpath)
+        c = super().classify(relpath.removeprefix(self.web_relative))
         if relpath.startswith(self.web_relative):
             c.web = True
             relpath.removeprefix(self.web_relative)
@@ -135,7 +198,16 @@ class Judgements:
             rdr = csv.DictReader(f)
             for row in rdr:
                 self.judgments[row["relative_path"]] = ValueJudgment(
-                    **unflatten_dict(row)
+                    **unflatten_dict(
+                        {
+                            k: (
+                                True
+                                if k != "relative_path" and "." not in k and v == k
+                                else v
+                            )
+                            for k, v in row.items()
+                        }
+                    )
                 )
 
     def save_judgments_csv(self, judgements_csv=JUDGMENT_CSV):
@@ -149,7 +221,12 @@ class Judgements:
             wrtr.writeheader()
             for rp in sorted(self.judgments):
                 vj = self.judgments[rp]
-                wrtr.writerow(flatten_dict(dataclasses.asdict(vj)))
+                wrtr.writerow(
+                    {
+                        k: (k if isinstance(v, bool) and v else v)
+                        for k, v in flatten_dict(dataclasses.asdict(vj)).items()
+                    }
+                )
 
     def __getitem__(self, key):
         if not isinstance(key, str):
