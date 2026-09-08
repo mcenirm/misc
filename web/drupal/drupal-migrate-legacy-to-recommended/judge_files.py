@@ -1,49 +1,17 @@
 from __future__ import annotations
 
+import argparse
 import collections
 import collections.abc
 import csv
 import dataclasses
 import datetime
-import difflib
 import fnmatch
-import glob
+import inspect
+import json
 import pathlib
-import sys
 import traceback
 import typing
-
-HERE = pathlib.Path(__file__).parent
-OUT = HERE / "out"
-OUT.mkdir(exist_ok=True)
-JUDGMENT_CSV = OUT / "judgement.csv"
-
-
-WEBSITE_ROOT = HERE.parent.parent
-DRUPAL_URL_PATH = "home"
-LEGACY_ROOT = WEBSITE_ROOT / "html_ssl" / DRUPAL_URL_PATH
-LEGACY_WEB = LEGACY_ROOT
-RECOMMENDED_ROOT = WEBSITE_ROOT / ("drupal-" + DRUPAL_URL_PATH.replace("/", "-"))
-RECOMMENDED_WEB = RECOMMENDED_ROOT / "web"
-
-
-############################################################
-
-
-complained = False
-for label, path in [
-    ("Website root", WEBSITE_ROOT),
-    ("Legacy root", LEGACY_ROOT),
-    ("Legacy web", LEGACY_WEB),
-    ("Recommended root", RECOMMENDED_ROOT),
-    ("Recommended web", RECOMMENDED_WEB),
-]:
-    if not path.is_dir():
-        print("!!", "directory does not exist:", path)
-        complained = True
-
-if complained:
-    sys.exit(1)
 
 
 ############################################################
@@ -100,6 +68,29 @@ class ValueJudgment(Qualities, SomethingThatHasARelativePath):
             self.actual = FileMetadata(**self.actual)
         if not isinstance(self.expected, FileMetadata):
             self.expected = FileMetadata(**self.expected)
+
+
+############################################################
+
+
+@dataclasses.dataclass
+class ComposerPackage:
+    @classmethod
+    def from_path(cls, path: pathlib.Path) -> ComposerPackage:
+        path = pathlib.Path(path)
+        data = json.loads(path.read_bytes())
+        raise TODO(*data.items())
+        return cls()
+
+
+class ComposerProject:
+    def __init__(
+        self,
+        project_dir: pathlib.Path,
+        composer_json_name: str = "composer.json",
+    ) -> None:
+        self.project_dir = pathlib.Path(project_dir)
+        self.package = ComposerPackage.from_path(self.project_dir / composer_json_name)
 
 
 ############################################################
@@ -193,7 +184,8 @@ class RecommendedClassifier(Classifier):
 class Judgements:
     judgments: dict[str, ValueJudgment] = dataclasses.field(default_factory=dict)
 
-    def load_judgments_csv(self, judgements_csv=JUDGMENT_CSV):
+    def load_judgments_csv(self, judgements_csv: pathlib.Path):
+        judgements_csv = pathlib.Path(judgements_csv)
         with judgements_csv.open("r", encoding="utf-8", newline=None) as f:
             rdr = csv.DictReader(f)
             for row in rdr:
@@ -210,12 +202,13 @@ class Judgements:
                     )
                 )
 
-    def save_judgments_csv(self, judgements_csv=JUDGMENT_CSV):
+    def save_judgments_csv(self, judgements_csv):
+        judgements_csv = pathlib.Path(judgements_csv)
         with judgements_csv.open("w", encoding="utf-8", newline=None) as f:
             wrtr = csv.DictWriter(
                 f,
                 flatten_dict(
-                    dataclasses.asdict(ValueJudgment(relative_path=""))
+                    dataclasses.asdict(ValueJudgment(None))  # type: ignore
                 ).keys(),
             )
             wrtr.writeheader()
@@ -235,7 +228,7 @@ class Judgements:
                 key,
             )
         if key not in self.judgments:
-            self.judgments[key] = ValueJudgment(relative_path=key)
+            self.judgments[key] = ValueJudgment(relative_path=pathlib.Path(key))
         return self.judgments[key]
 
     def added(self, relpath: str, contestant_file: pathlib.Path):
@@ -257,7 +250,7 @@ class Judgements:
         if vj.expected.size_bytes != vj.actual.size_bytes:
             vj.changed = True
         if vj.expected.mtime != vj.actual.mtime:
-            vj.drift = True
+            vj.drifted = True
 
     def qualities(self, relpath: str, q: Qualities):
         vj = self[relpath]
@@ -282,29 +275,6 @@ def relative_walk(start: pathlib.Path) -> collections.abc.Generator[str, None, N
             yield (rr / f).as_posix()
 
 
-def just_files(start: pathlib.Path) -> dict[pathlib.Path, pathlib.Path]:
-    return set(
-        sorted(
-            root / n
-            for root, _, files in start.walk(
-                top_down=False, on_error=None, follow_symlinks=False
-            )
-            for n in files
-        )
-    )
-
-
-def just_dirs(start: pathlib.Path) -> set[pathlib.Path]:
-    return set(
-        sorted(
-            root
-            for root, _, _ in start.walk(
-                top_down=False, on_error=None, follow_symlinks=False
-            )
-        )
-    )
-
-
 def flatten_dict(d: dict, sep: str = ".", parent_key: str = "") -> dict:
     items = []
     for k, v in d.items():
@@ -327,40 +297,48 @@ def unflatten_dict(d: dict, sep: str = ".") -> dict:
     return result
 
 
-def main(
-    judgment_csv: pathlib.Path = JUDGMENT_CSV,
-    legacy_dir: pathlib.Path = LEGACY_WEB,
-    recommended_root_dir: pathlib.Path = RECOMMENDED_ROOT,
-    recommended_web_dir: pathlib.Path = RECOMMENDED_WEB,
+def judge_files(
+    judgments_csv: pathlib.Path,
+    legacy_dir: pathlib.Path,
+    recommended_dir: pathlib.Path,
+    recommended_web_relative: str = "web/",
 ):
+    judgments_csv = pathlib.Path(judgments_csv)
+    legacy_dir = pathlib.Path(legacy_dir)
+    recommended_dir = pathlib.Path(recommended_dir)
+    recommended_web_relative = recommended_web_relative.rstrip("/") + "/"
+
+    recommended_web_dir = recommended_dir / recommended_web_relative
+
+    legacy = ComposerProject(legacy_dir)
+
     leg_cfier = LegacyClassifier()
     leg_cfications = {rp: leg_cfier.classify(rp) for rp in relative_walk(legacy_dir)}
-    web_relative = recommended_web_dir.relative_to(recommended_root_dir)
-    rec_cfier = RecommendedClassifier(web_relative=web_relative)
+    rec_cfier = RecommendedClassifier(web_relative=recommended_web_relative)
     rec_cfications = {
-        rp: rec_cfier.classify(rp) for rp in relative_walk(recommended_root_dir)
+        rp: rec_cfier.classify(rp) for rp in relative_walk(recommended_dir)
     }
 
     judgements = Judgements()
-    if judgment_csv.exists():
-        judgements.load_judgments_csv()
+    if judgments_csv.exists():
+        judgements.load_judgments_csv(judgments_csv)
 
     for leg_relpath, leg_quals in leg_cfications.items():
         leg_file = legacy_dir / leg_relpath
         rec_relpath = leg_relpath
         rec_relpath, rec_dir = (
-            (rec_relpath, recommended_root_dir)
+            (rec_relpath, recommended_dir)
             if rec_relpath in rec_cfications
             else (
                 (_rec_web_relpath, recommended_web_dir)
-                if (_rec_web_relpath := str(web_relative / leg_relpath))
+                if (_rec_web_relpath := recommended_web_relative + leg_relpath)
                 in rec_cfications
                 else (None, None)
             )
         )
         if rec_relpath in rec_cfications:
             rec_quals = rec_cfications.pop(rec_relpath)
-            rec_file = rec_dir / rec_relpath
+            rec_file = rec_dir / rec_relpath  # type: ignore
             judgements.compare(leg_relpath, leg_file, rec_file)
         else:
             rec_quals = Qualities()
@@ -375,21 +353,46 @@ def main(
         )
 
     for rec_relpath, rec_quals in rec_cfications.items():
-        rec_file = recommended_root_dir / rec_relpath
+        rec_file = recommended_dir / rec_relpath
         judgements.missing(rec_relpath, rec_file)
         judgements.qualities(rec_relpath, rec_quals)
 
-    if judgment_csv.exists():
-        judgment_csv.rename(judgment_csv.with_suffix(".bak"))
-    judgements.save_judgments_csv()
+    if judgments_csv.exists():
+        judgments_csv.rename(judgments_csv.with_suffix(".bak"))
+    judgements.save_judgments_csv(judgments_csv)
 
 
-class TODO(NotImplementedError): ...
+############################################################
 
 
-if __name__ == "__main__":
+def argument_parser_from_function(
+    f: collections.abc.Callable[..., typing.Any],
+) -> argparse.ArgumentParser:
+    s = inspect.signature(f)
+    h = typing.get_type_hints(f)
+    _ = h.pop("return", None)
+    ap = argparse.ArgumentParser(
+        description=f.__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    for n, t in h.items():
+        opt = "--" + n.replace("_", "-")
+        kw = dict(type=t)
+        if s.parameters[n].default is not inspect.Parameter.empty:
+            kw["default"] = s.parameters[n].default
+            kw["help"] = n.replace("_", " ")
+        ap.add_argument(opt, **kw)
+    return ap
+
+
+def meighn(
+    actual_function: collections.abc.Callable,
+    args: list[str] | None = None,
+):
+    ap = argument_parser_from_function(actual_function)
+    ns = ap.parse_args(args).__dict__
     try:
-        main()
+        return actual_function(**ns)
     except NotImplementedError as e:
         print(type(e).__name__)
         for a in e.args:
@@ -403,3 +406,10 @@ if __name__ == "__main__":
         print()
         print(traceback.format_exception(e)[-2])
         print()
+
+
+class TODO(NotImplementedError): ...
+
+
+if __name__ == "__main__":
+    meighn(judge_files)
