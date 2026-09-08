@@ -11,8 +11,8 @@ import inspect
 import json
 import pathlib
 import traceback
+import types
 import typing
-
 
 ############################################################
 
@@ -74,13 +74,121 @@ class ValueJudgment(Qualities, SomethingThatHasARelativePath):
 
 
 @dataclasses.dataclass
-class ComposerPackage:
+class _FromDict:
+    @classmethod
+    def from_dict(cls, data: dict) -> typing.Self:
+        if not isinstance(data, dict):
+            raise NotImplementedError(
+                "expected dict",
+                type(data).__name__,
+                "for dataclass",
+                cls.__name__,
+            )
+        typehints = {
+            k: guess_optional_typelist(v) for k, v in typing.get_type_hints(cls).items()
+        }
+        kwargs = {}
+        for fld in dataclasses.fields(cls):
+            inname = fld.name.replace("_", "-")
+            if inname in data:
+                invalue = data.pop(inname)
+                if isinstance(invalue, list):
+                    for typehint in typehints.get(fld.name):
+                        itemtype = guess_list_item_type(typehint)
+                        if issubclass(itemtype, _FromDict):
+                            value = [itemtype.from_dict(it) for it in invalue]
+                            break
+                        elif itemtype:
+                            value = [itemtype(it) for it in invalue]
+                            break
+                    else:
+                        value = [it for it in invalue]
+                elif isinstance(invalue, dict):
+                    for typehint in typehints.get(fld.name):
+                        if issubclass(typehint, _FromDict):
+                            value = typehint.from_dict(invalue)
+                            break
+                        elif typehint:
+                            value = typehint(
+                                **{k.replace("-", "_"): v for k, v in invalue.items()}
+                            )
+                            break
+                    else:
+                        value = {k: v for k, v in invalue.items()}
+                else:
+                    value = invalue
+                kwargs[fld.name] = value
+        if data:
+            raise NotImplementedError(
+                "unhandled keys for dataclass",
+                cls.__name__,
+                *data.items(),
+            )
+        return cls(**kwargs)
+
+
+def guess_list_item_type(typehint):
+    origin = typing.get_origin(typehint)
+    if origin is list:
+        for arg in typing.get_args(typehint):
+            return arg
+    else:
+        raise NotImplementedError(
+            "expected list generic alias",
+            typehint,
+            origin,
+        )
+
+
+def guess_optional_typelist(typehint):
+    return [t for t in typing.get_args(typehint) if t is not types.NoneType] or [
+        typing.get_origin(typehint)
+    ]
+
+
+############################################################
+
+
+@dataclasses.dataclass
+class ComposerPackageSupport(_FromDict):
+    docs: str | None = None
+    chat: str | None = None
+
+
+@dataclasses.dataclass
+class ComposerPackageRepository(_FromDict):
+    type: str
+    url: str
+
+
+@dataclasses.dataclass
+class ComposerPackageConfig(_FromDict):
+    sort_packages: bool | None = None
+    allow_plugins: dict[str, bool] | None = None
+
+
+@dataclasses.dataclass
+class ComposerPackage(_FromDict):
+    name: str | None = None
+    description: str | None = None
+    type: str | None = None
+    license: str | None = None
+    homepage: str | None = None
+    support: ComposerPackageSupport | None = None
+    repositories: list[ComposerPackageRepository] | None = None
+    require: dict[str, str] | None = None
+    conflict: dict[str, str] | None = None
+    minimum_stability: str | None = None
+    prefer_stable: bool | None = None
+    config: ComposerPackageConfig | None = None
+    extra: dict | None = None
+    require_dev: dict[str, str] | None = None
+
     @classmethod
     def from_path(cls, path: pathlib.Path) -> ComposerPackage:
         path = pathlib.Path(path)
         data = json.loads(path.read_bytes())
-        raise TODO(*data.items())
-        return cls()
+        return cls.from_dict(data)
 
 
 class ComposerProject:
@@ -310,7 +418,13 @@ def judge_files(
 
     recommended_web_dir = recommended_dir / recommended_web_relative
 
-    legacy = ComposerProject(legacy_dir)
+    if not recommended_dir.is_dir():
+        legacy = ComposerProject(legacy_dir)
+        raise TODO(
+            "determine drupal version from legacy",
+            "and then construct new recommended using the same version",
+            legacy.package.name,
+        )
 
     leg_cfier = LegacyClassifier()
     leg_cfications = {rp: leg_cfier.classify(rp) for rp in relative_walk(legacy_dir)}
