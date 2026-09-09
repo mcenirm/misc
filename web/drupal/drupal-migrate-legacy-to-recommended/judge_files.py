@@ -7,12 +7,15 @@ import csv
 import dataclasses
 import datetime
 import fnmatch
+import functools
 import inspect
 import json
+import operator
 import pathlib
 import traceback
 import types
 import typing
+
 
 ############################################################
 
@@ -73,6 +76,76 @@ class ValueJudgment(Qualities, SomethingThatHasARelativePath):
 ############################################################
 
 
+class TypeHintHelper:
+    def __init__(self, typehint) -> None:
+        if typehint is None:
+            raise TypeError("typehint should not be None")
+        self._hint = typehint
+        self._hint_origin = typing.get_origin(typehint)
+        self._hint_args = typing.get_args(typehint)
+        if type(self._hint) in (typing.Optional, typing.Union):
+            typelist = [t for t in self._hint_args if t is not type(None)]
+            self._type = functools.reduce(operator.or_, typelist)
+        elif type(self._hint) is type:
+            self._type = self._hint
+        else:
+            self._type = self._hint_origin
+        self._origin = typing.get_origin(self._type)
+        self._args = typing.get_args(self._type)
+        if self._origin is list:
+            self._item_helpers = [TypeHintHelper(a) for a in self._args]
+        elif self._origin is dict and len(self._args) == 2:
+            self._item_helpers = [TypeHintHelper(self._args[1])]
+        else:
+            self._item_helpers = []
+
+    def cast(self, value):
+        if value is None:
+            return None
+        if isinstance(value, bool) and self._type is bool:
+            return value
+        if isinstance(value, str) and self._type is str:
+            return value
+        if isinstance(value, str) and (self._type is list or self._origin is list):
+            return [value]
+        if isinstance(value, dict) and (self._type is dict or self._origin is dict):
+            castdict = {}
+            for k, item1 in value.items():
+                for helper in self._item_helpers:
+                    item2 = helper.cast(item1)
+                    if item2 is not None:
+                        castdict[k] = item2
+                        break
+                else:
+                    castdict[k] = item1
+            return castdict
+        if isinstance(value, dict) and hasattr(self._type, "from_dict"):
+            return self._type.from_dict(value)
+        if isinstance(value, list) and self._origin is list:
+            castlist = []
+            for item1 in value:
+                for helper in self._item_helpers:
+                    item2 = helper.cast(item1)
+                    if item2 is not None:
+                        castlist.append(item2)
+                        break
+                else:
+                    castlist.append(item1)
+            return castlist
+        raise NotImplementedError(
+            "unhandled type pairing",
+            self._hint,
+            self._hint_origin,
+            self._hint_args,
+            "-----",
+            self._type,
+            self._origin,
+            self._args,
+            "-----",
+            value,
+        )
+
+
 @dataclasses.dataclass
 class _FromDict:
     @classmethod
@@ -85,38 +158,18 @@ class _FromDict:
                 cls.__name__,
             )
         typehints = {
-            k: guess_optional_typelist(v) for k, v in typing.get_type_hints(cls).items()
+            k: TypeHintHelper(v) for k, v in typing.get_type_hints(cls).items()
         }
         kwargs = {}
         for fld in dataclasses.fields(cls):
-            inname = fld.name.replace("_", "-")
+            if fld.name in data:
+                inname = fld.name
+            else:
+                inname = fld.name.replace("_", "-")
             if inname in data:
                 invalue = data.pop(inname)
-                if isinstance(invalue, list):
-                    for typehint in typehints.get(fld.name):
-                        itemtype = guess_list_item_type(typehint)
-                        if issubclass(itemtype, _FromDict):
-                            value = [itemtype.from_dict(it) for it in invalue]
-                            break
-                        elif itemtype:
-                            value = [itemtype(it) for it in invalue]
-                            break
-                    else:
-                        value = [it for it in invalue]
-                elif isinstance(invalue, dict):
-                    for typehint in typehints.get(fld.name):
-                        if issubclass(typehint, _FromDict):
-                            value = typehint.from_dict(invalue)
-                            break
-                        elif typehint:
-                            value = typehint(
-                                **{k.replace("-", "_"): v for k, v in invalue.items()}
-                            )
-                            break
-                    else:
-                        value = {k: v for k, v in invalue.items()}
-                else:
-                    value = invalue
+                hint = typehints[fld.name]
+                value = hint.cast(invalue)
                 kwargs[fld.name] = value
         if data:
             raise NotImplementedError(
@@ -127,25 +180,6 @@ class _FromDict:
         return cls(**kwargs)
 
 
-def guess_list_item_type(typehint):
-    origin = typing.get_origin(typehint)
-    if origin is list:
-        for arg in typing.get_args(typehint):
-            return arg
-    else:
-        raise NotImplementedError(
-            "expected list generic alias",
-            typehint,
-            origin,
-        )
-
-
-def guess_optional_typelist(typehint):
-    return [t for t in typing.get_args(typehint) if t is not types.NoneType] or [
-        typing.get_origin(typehint)
-    ]
-
-
 ############################################################
 
 
@@ -153,6 +187,8 @@ def guess_optional_typelist(typehint):
 class ComposerPackageSupport(_FromDict):
     docs: str | None = None
     chat: str | None = None
+    issues: str | None = None
+    source: str | None = None
 
 
 @dataclasses.dataclass
@@ -172,7 +208,7 @@ class ComposerPackage(_FromDict):
     name: str | None = None
     description: str | None = None
     type: str | None = None
-    license: str | None = None
+    license: list[str] | None = None
     homepage: str | None = None
     support: ComposerPackageSupport | None = None
     repositories: list[ComposerPackageRepository] | None = None
@@ -187,8 +223,18 @@ class ComposerPackage(_FromDict):
     @classmethod
     def from_path(cls, path: pathlib.Path) -> ComposerPackage:
         path = pathlib.Path(path)
-        data = json.loads(path.read_bytes())
+        if path.exists():
+            data = json.loads(path.read_bytes())
+        else:
+            data = {}
         return cls.from_dict(data)
+
+
+@dataclasses.dataclass
+class ComposerLock(ComposerPackage):
+    _readme: list[str] | None = None
+    content_hash: str | None = None
+    packages: list[ComposerPackage] | None = None
 
 
 class ComposerProject:
@@ -196,9 +242,13 @@ class ComposerProject:
         self,
         project_dir: pathlib.Path,
         composer_json_name: str = "composer.json",
+        composer_lock_name: str = "composer.lock",
     ) -> None:
         self.project_dir = pathlib.Path(project_dir)
-        self.package = ComposerPackage.from_path(self.project_dir / composer_json_name)
+        self.composer_json_file = self.project_dir / composer_json_name
+        self.composer_lock_file = self.project_dir / composer_lock_name
+        self.package = ComposerPackage.from_path(self.composer_json_file)
+        self.lock = ComposerLock.from_path(self.composer_lock_file)
 
 
 ############################################################
@@ -418,8 +468,10 @@ def judge_files(
 
     recommended_web_dir = recommended_dir / recommended_web_relative
 
+    legacy = ComposerProject(legacy_dir)
+    recommended = ComposerProject(recommended_dir)
+
     if not recommended_dir.is_dir():
-        legacy = ComposerProject(legacy_dir)
         raise TODO(
             "determine drupal version from legacy",
             "and then construct new recommended using the same version",
