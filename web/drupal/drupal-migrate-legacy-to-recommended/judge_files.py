@@ -12,10 +12,12 @@ import inspect
 import json
 import operator
 import pathlib
+import sys
 import traceback
 import types
 import typing
 
+import dacite
 
 ############################################################
 
@@ -76,165 +78,124 @@ class ValueJudgment(Qualities, SomethingThatHasARelativePath):
 ############################################################
 
 
-class TypeHintHelper:
-    def __init__(self, typehint) -> None:
-        if typehint is None:
-            raise TypeError("typehint should not be None")
-        self._hint = typehint
-        self._hint_origin = typing.get_origin(typehint)
-        self._hint_args = typing.get_args(typehint)
-        if type(self._hint) in (typing.Optional, typing.Union):
-            typelist = [t for t in self._hint_args if t is not type(None)]
-            self._type = functools.reduce(operator.or_, typelist)
-        elif type(self._hint) is type:
-            self._type = self._hint
-        else:
-            self._type = self._hint_origin
-        self._origin = typing.get_origin(self._type)
-        self._args = typing.get_args(self._type)
-        if self._origin is list:
-            self._item_helpers = [TypeHintHelper(a) for a in self._args]
-        elif self._origin is dict and len(self._args) == 2:
-            self._item_helpers = [TypeHintHelper(self._args[1])]
-        else:
-            self._item_helpers = []
-
-    def cast(self, value):
-        if value is None:
-            return None
-        if isinstance(value, bool) and self._type is bool:
-            return value
-        if isinstance(value, str) and self._type is str:
-            return value
-        if isinstance(value, str) and (self._type is list or self._origin is list):
-            return [value]
-        if isinstance(value, dict) and (self._type is dict or self._origin is dict):
-            castdict = {}
-            for k, item1 in value.items():
-                for helper in self._item_helpers:
-                    item2 = helper.cast(item1)
-                    if item2 is not None:
-                        castdict[k] = item2
-                        break
-                else:
-                    castdict[k] = item1
-            return castdict
-        if isinstance(value, dict) and hasattr(self._type, "from_dict"):
-            return self._type.from_dict(value)
-        if isinstance(value, list) and self._origin is list:
-            castlist = []
-            for item1 in value:
-                for helper in self._item_helpers:
-                    item2 = helper.cast(item1)
-                    if item2 is not None:
-                        castlist.append(item2)
-                        break
-                else:
-                    castlist.append(item1)
-            return castlist
-        raise NotImplementedError(
-            "unhandled type pairing",
-            self._hint,
-            self._hint_origin,
-            self._hint_args,
-            "-----",
-            self._type,
-            self._origin,
-            self._args,
-            "-----",
-            value,
-        )
+@dataclasses.dataclass
+class ComposerPackageUrl:
+    type: str | None = None
+    url: str | None = None
 
 
 @dataclasses.dataclass
-class _FromDict:
-    @classmethod
-    def from_dict(cls, data: dict) -> typing.Self:
-        if not isinstance(data, dict):
-            raise NotImplementedError(
-                "expected dict",
-                type(data).__name__,
-                "for dataclass",
-                cls.__name__,
-            )
-        typehints = {
-            k: TypeHintHelper(v) for k, v in typing.get_type_hints(cls).items()
-        }
-        kwargs = {}
-        for fld in dataclasses.fields(cls):
-            if fld.name in data:
-                inname = fld.name
-            else:
-                inname = fld.name.replace("_", "-")
-            if inname in data:
-                invalue = data.pop(inname)
-                hint = typehints[fld.name]
-                value = hint.cast(invalue)
-                kwargs[fld.name] = value
-        if data:
-            raise NotImplementedError(
-                "unhandled keys for dataclass",
-                cls.__name__,
-                *data.items(),
-            )
-        return cls(**kwargs)
-
-
-############################################################
+class ComposerPackageAuthor:
+    name: str | None = None
+    email: str | None = None
+    homepage: str | None = None
+    role: str | None = None
 
 
 @dataclasses.dataclass
-class ComposerPackageSupport(_FromDict):
-    docs: str | None = None
+class ComposerPackageAutoload:
+    classmap: list[str] | None = None
+    exclude_from_classmap: list[str] | None = None
+    files: list[str] | None = None
+    psr_0: dict[str, str] | None = None
+    psr_4: dict[str, str | list[str]] | None = None
+
+
+@dataclasses.dataclass
+class ComposerPackageDist(ComposerPackageUrl):
+    reference: str | None = None
+    shasum: str | None = None
+
+
+@dataclasses.dataclass
+class ComposerPackageSource(ComposerPackageUrl):
+    reference: str | None = None
+
+
+@dataclasses.dataclass
+class ComposerPackageSupport:
     chat: str | None = None
+    docs: str | None = None
+    documentation: str | None = None
+    email: str | None = None
+    forum: str | None = None
+    irc: str | None = None
     issues: str | None = None
+    rss: str | None = None
+    security: str | None = None
+    slack: str | None = None
     source: str | None = None
+    wiki: str | None = None
 
 
 @dataclasses.dataclass
-class ComposerPackageRepository(_FromDict):
+class ComposerPackageRepository:
     type: str
     url: str
 
 
 @dataclasses.dataclass
-class ComposerPackageConfig(_FromDict):
+class ComposerPackageConfig:
     sort_packages: bool | None = None
     allow_plugins: dict[str, bool] | None = None
 
 
 @dataclasses.dataclass
-class ComposerPackage(_FromDict):
-    name: str | None = None
+class ComposerPackage:
+    config: ComposerPackageConfig | None = None
+    conflict: dict[str, str] | None = None
     description: str | None = None
-    type: str | None = None
-    license: list[str] | None = None
+    extra: dict | None = None
     homepage: str | None = None
-    support: ComposerPackageSupport | None = None
+    license: str | list[str] | None = None
+    minimum_stability: str | None = None
+    name: str | None = None
+    prefer_stable: bool | None = None
     repositories: list[ComposerPackageRepository] | None = None
     require: dict[str, str] | None = None
-    conflict: dict[str, str] | None = None
-    minimum_stability: str | None = None
-    prefer_stable: bool | None = None
-    config: ComposerPackageConfig | None = None
-    extra: dict | None = None
     require_dev: dict[str, str] | None = None
+    support: ComposerPackageSupport | None = None
+    type: str | None = None
 
-    @classmethod
-    def from_path(cls, path: pathlib.Path) -> ComposerPackage:
-        path = pathlib.Path(path)
-        if path.exists():
-            data = json.loads(path.read_bytes())
-        else:
-            data = {}
-        return cls.from_dict(data)
+    def __post_init__(self):
+        if isinstance(self.license, str):
+            self.license = [self.license]
 
 
 @dataclasses.dataclass
-class ComposerLock(ComposerPackage):
+class ComposerPackageLocked(ComposerPackage):
+    abandoned: bool | str | None = None
+    authors: list[ComposerPackageAuthor] | None = None
+    autoload: ComposerPackageAutoload | None = None
+    bin: list[str] | None = None
+    dist: ComposerPackageDist | None = None
+    funding: list[ComposerPackageUrl] | None = None
+    include_path: list[str] | None = None
+    keywords: list[str] | None = None
+    notification_url: str | None = None
+    provide: dict[str, str] | None = None
+    replace: dict[str, str] | None = None
+    scripts: dict[str, list[str]] | None = None
+    source: ComposerPackageSource | None = None
+    suggest: dict[str, str] | None = None
+    time: str | None = None
+    version: str | None = None
+
+
+@dataclasses.dataclass
+class ComposerLock:
     _readme: list[str] | None = None
+    aliases: list[str] | None = None
     content_hash: str | None = None
-    packages: list[ComposerPackage] | None = None
+    minimum_stability: str | None = None
+    packages: list[ComposerPackageLocked] | None = None
+    packages_dev: list[ComposerPackageLocked] | None = None
+    platform: dict | None = None
+    platform_dev: dict | None = None
+    plugin_api_version: str | None = None
+    prefer_lowest: bool | None = None
+    prefer_stable: bool | None = None
+    stability_flags: dict[str, int] | None = None
 
 
 class ComposerProject:
@@ -247,8 +208,50 @@ class ComposerProject:
         self.project_dir = pathlib.Path(project_dir)
         self.composer_json_file = self.project_dir / composer_json_name
         self.composer_lock_file = self.project_dir / composer_lock_name
-        self.package = ComposerPackage.from_path(self.composer_json_file)
-        self.lock = ComposerLock.from_path(self.composer_lock_file)
+        self.package = from_composer_file(ComposerPackage, self.composer_json_file)
+        self.lock = from_composer_file(ComposerLock, self.composer_lock_file)
+
+
+def from_composer_file[T](cls: type[T], path: pathlib.Path) -> T:
+    path = pathlib.Path(path)
+    if path.exists():
+        data = json.loads(path.read_bytes())
+    else:
+        data = {}
+    data = composer_json_keys_to_python_identifiers(data)
+    try:
+        return dacite.from_dict(
+            data_class=cls,
+            data=data,
+            config=dacite.Config(strict=True),
+        )
+    except dacite.UnexpectedDataError as ude:
+        exctype, excobj, tb = sys.exc_info()
+        data_class_stack: list[types.FrameType] = []
+        while tb:
+            fl = tb.tb_frame.f_locals
+            if fl and "data_class" in fl:
+                data_class_stack.append(fl.get("data_class"))
+            tb = tb.tb_next
+        raise NotImplementedError(
+            *traceback.format_exception_only(ude),
+            "----------",
+            *ude.keys,
+            "----------",
+            *data_class_stack,
+            "----------",
+        )
+
+
+def composer_json_keys_to_python_identifiers(data):
+    if isinstance(data, dict):
+        return {
+            k.replace("-", "_"): composer_json_keys_to_python_identifiers(v)
+            for k, v in data.items()
+        }
+    if isinstance(data, list):
+        return [composer_json_keys_to_python_identifiers(item) for item in data]
+    return data
 
 
 ############################################################
@@ -471,11 +474,16 @@ def judge_files(
     legacy = ComposerProject(legacy_dir)
     recommended = ComposerProject(recommended_dir)
 
-    if not recommended_dir.is_dir():
+    if recommended.package.name is None:
         raise TODO(
             "determine drupal version from legacy",
             "and then construct new recommended using the same version",
             legacy.package.name,
+            *(
+                (p.name, p.version)
+                for p in legacy.lock.packages
+                if p.name.startswith("drupal/core-")
+            ),
         )
 
     leg_cfier = LegacyClassifier()
