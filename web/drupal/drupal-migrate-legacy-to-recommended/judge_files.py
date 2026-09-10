@@ -12,6 +12,7 @@ import inspect
 import json
 import operator
 import pathlib
+import subprocess
 import sys
 import traceback
 import types
@@ -145,7 +146,7 @@ class ComposerPackage:
     config: ComposerPackageConfig | None = None
     conflict: dict[str, str] | None = None
     description: str | None = None
-    extra: dict | None = None
+    extra: dict[str, typing.Any] | None = None
     homepage: str | None = None
     license: str | list[str] | None = None
     minimum_stability: str | None = None
@@ -190,8 +191,9 @@ class ComposerLock:
     minimum_stability: str | None = None
     packages: list[ComposerPackageLocked] | None = None
     packages_dev: list[ComposerPackageLocked] | None = None
-    platform: dict | None = None
-    platform_dev: dict | None = None
+    platform: dict[str, str] | None = None
+    platform_dev: dict[str, str] | None = None
+    platform_overrides: dict[str, str] | None = None
     plugin_api_version: str | None = None
     prefer_lowest: bool | None = None
     prefer_stable: bool | None = None
@@ -223,7 +225,19 @@ def from_composer_file[T](cls: type[T], path: pathlib.Path) -> T:
         return dacite.from_dict(
             data_class=cls,
             data=data,
-            config=dacite.Config(strict=True),
+            config=dacite.Config(
+                type_hooks={
+                    dict: empty_list_to_dict,
+                    dict[str, str]: empty_list_to_dict,
+                    dict[str, int]: empty_list_to_dict,
+                },
+                cast=[],
+                forward_references=None,
+                check_types=True,
+                strict=True,
+                strict_unions_match=False,
+                convert_key=convert_key_composer_json_to_python_identifiers,
+            ),
         )
     except dacite.UnexpectedDataError as ude:
         exctype, excobj, tb = sys.exc_info()
@@ -231,7 +245,7 @@ def from_composer_file[T](cls: type[T], path: pathlib.Path) -> T:
         while tb:
             fl = tb.tb_frame.f_locals
             if fl and "data_class" in fl:
-                data_class_stack.append(fl.get("data_class"))
+                data_class_stack.append(fl["data_class"])
             tb = tb.tb_next
         raise NotImplementedError(
             *traceback.format_exception_only(ude),
@@ -243,10 +257,22 @@ def from_composer_file[T](cls: type[T], path: pathlib.Path) -> T:
         )
 
 
+def empty_list_to_dict(value):
+    if isinstance(value, list) and not value:
+        value = {}
+    return value
+
+
+def convert_key_composer_json_to_python_identifiers(key: str) -> str:
+    return key.replace("-", "_")
+
+
 def composer_json_keys_to_python_identifiers(data):
     if isinstance(data, dict):
         return {
-            k.replace("-", "_"): composer_json_keys_to_python_identifiers(v)
+            convert_key_composer_json_to_python_identifiers(
+                k
+            ): composer_json_keys_to_python_identifiers(v)
             for k, v in data.items()
         }
     if isinstance(data, list):
@@ -472,18 +498,39 @@ def judge_files(
     recommended_web_dir = recommended_dir / recommended_web_relative
 
     legacy = ComposerProject(legacy_dir)
-    recommended = ComposerProject(recommended_dir)
+    if legacy.package.name is None:
+        raise NotImplementedError(
+            "could not find name of legacy project",
+            legacy.composer_json_file,
+        )
 
+    recommended = ComposerProject(recommended_dir)
     if recommended.package.name is None:
-        raise TODO(
-            "determine drupal version from legacy",
-            "and then construct new recommended using the same version",
-            legacy.package.name,
-            *(
-                (p.name, p.version)
-                for p in legacy.lock.packages
-                if p.name.startswith("drupal/core-")
-            ),
+        if recommended_dir.is_dir() and list(recommended_dir.iterdir()):
+            raise NotImplementedError(
+                "recommended project directory should be empty",
+                recommended_dir,
+            )
+        for p in legacy.lock.packages or []:
+            if p.name == "drupal/core":
+                legacy_locked_version = p.version
+                break
+        else:
+            raise NotImplementedError(
+                "unable to extract drupal version",
+                legacy.composer_lock_file,
+            )
+        subprocess.check_call(
+            [
+                "composer",
+                "create-project",
+                f"drupal/recommended-project:{legacy_locked_version}",
+                str(recommended_dir),
+                "--ignore-platform-reqs",
+                "--no-ansi",
+                "--no-interaction",
+            ],
+            universal_newlines=True,
         )
 
     leg_cfier = LegacyClassifier()
