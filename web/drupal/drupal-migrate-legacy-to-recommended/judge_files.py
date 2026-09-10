@@ -11,6 +11,7 @@ import functools
 import inspect
 import json
 import operator
+import os
 import pathlib
 import subprocess
 import sys
@@ -34,15 +35,12 @@ class Qualities:
     web: bool | None = None
     sites: bool | None = None
     sites_files: bool | None = None
-    modules: bool | None = None
-    themes: bool | None = None
+    core: bool | None = None
     libraries: bool | None = None
+    modules: bool | None = None
+    profiles: bool | None = None
+    themes: bool | None = None
     unexpected: bool | None = None
-
-    module: str | None = None
-    theme: str | None = None
-    library: str | None = None
-    installed_package: str | None = None
 
 
 @dataclasses.dataclass
@@ -67,8 +65,17 @@ class ValueJudgment(Qualities, SomethingThatHasARelativePath):
     custom: bool | None = None
     drifted: bool | None = None
     missing: bool | None = None
+
     actual: FileMetadata = dataclasses.field(default_factory=FileMetadata)
     expected: FileMetadata = dataclasses.field(default_factory=FileMetadata)
+
+    library: str | None = None
+    module: str | None = None
+    profile: str | None = None
+    theme: str | None = None
+    package_guess: str | None = None
+    legacy_version: str | None = None
+    recommended_version: str | None = None
 
     def __post_init__(self):
         if not isinstance(self.actual, FileMetadata):
@@ -185,6 +192,13 @@ class ComposerPackageLocked(ComposerPackage):
 
 
 @dataclasses.dataclass
+class ComposerPackageInstalled(ComposerPackageLocked):
+    install_path: str | None = None
+    installation_source: str | None = None
+    version_normalized: str | None = None
+
+
+@dataclasses.dataclass
 class ComposerLock:
     _readme: list[str] | None = None
     aliases: list[str] | None = None
@@ -201,18 +215,96 @@ class ComposerLock:
     stability_flags: dict[str, int] | None = None
 
 
+@dataclasses.dataclass
+class ComposerInstalled:
+    dev: bool | None = None
+    dev_package_names: list[str] | None = None
+    packages: list[ComposerPackageInstalled] | None = None
+
+
 class ComposerProject:
     def __init__(
         self,
         project_dir: pathlib.Path,
         composer_json_name: str = "composer.json",
         composer_lock_name: str = "composer.lock",
+        composer_installed_name: str = "vendor/composer/installed.json",
     ) -> None:
         self.project_dir = pathlib.Path(project_dir)
         self.composer_json_file = self.project_dir / composer_json_name
         self.composer_lock_file = self.project_dir / composer_lock_name
+        self.composer_installed_file = self.project_dir / composer_installed_name
         self.package = from_composer_file(ComposerPackage, self.composer_json_file)
         self.lock = from_composer_file(ComposerLock, self.composer_lock_file)
+        self.installed = from_composer_file(
+            ComposerInstalled, self.composer_installed_file
+        )
+
+        self._installed_name_to_pkg: dict[str, ComposerPackageInstalled] = {}
+        self._install_prefix_to_name: dict[str, str] = {}
+        if self.installed.packages:
+            for pkg in self.installed.packages:
+                if pkg.name:
+                    if pkg.name in self._installed_name_to_pkg:
+                        raise NotImplementedError(
+                            "installed package name conflict",
+                            pkg.name,
+                            self._installed_name_to_pkg[pkg.name],
+                            pkg,
+                            self.composer_installed_file,
+                        )
+                    else:
+                        self._installed_name_to_pkg[pkg.name] = pkg
+                if pkg.install_path:
+                    prefix = self.composer_installed_file.parent / pkg.install_path
+                    # "...\home\vendor\composer\../../web/core"
+
+                    prefix = pathlib.Path(os.path.normpath(prefix))
+                    # "...\home\web\core"
+
+                    prefix = prefix.relative_to(self.project_dir)
+                    # "web\core"
+
+                    prefix = prefix.as_posix() + "/"
+                    # "web/core/"
+
+                    if prefix in self._install_prefix_to_name:
+                        raise NotImplementedError(
+                            "installed package install_path conflict",
+                            prefix,
+                            self._install_prefix_to_name[prefix].name,
+                            pkg.name,
+                            self.composer_installed_file,
+                        )
+                    else:
+                        self._install_prefix_to_name[prefix] = pkg.name
+
+    def get_installed_package_by_name(
+        self,
+        package_name: str,
+    ) -> ComposerPackageInstalled | None:
+        if package_name is None:
+            return None
+        return self._installed_name_to_pkg.get(package_name)
+
+    def guess_package(self, relative_path: str) -> str | None:
+        if relative_path is None:
+            return None
+        candidates = [
+            (prefix, pkgname)
+            for prefix, pkgname in self._install_prefix_to_name.items()
+            if relative_path.startswith(prefix)
+        ]
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            prefix, pkgname = candidates[0]
+            return pkgname
+        raise NotImplementedError(
+            "too many candidate packages for install path",
+            relative_path,
+            *candidates,
+        )
 
 
 def from_composer_file[T](cls: type[T], path: pathlib.Path) -> T:
@@ -327,17 +419,22 @@ class Classifier:
                         relpath,
                     )
         elif parts[0] == "core":
-            ...
+            c.core = True
         elif parts[0] == "libraries":
-            ...
+            c.libraries = True
+            # TODO identify library
         elif parts[0] == "modules":
-            ...
+            c.modules = True
+            # TODO identify module
         elif parts[0] == "profiles":
-            ...
+            c.profiles = True
+            # TODO identify profile
         elif parts[0] == "themes":
-            ...
+            c.themes = True
+            # TODO identify theme
         elif parts[0] == "vendor":
-            ...
+            c.vendor = True
+            # TODO identify package
         elif parts[0] in {
             "images",
             "jqueryFileTree",
@@ -364,7 +461,6 @@ class RecommendedClassifier(Classifier):
         c = super().classify(relpath.removeprefix(self.web_relative))
         if relpath.startswith(self.web_relative):
             c.web = True
-            relpath.removeprefix(self.web_relative)
         return c
 
 
@@ -517,7 +613,7 @@ def judge_files(
                 break
         else:
             raise NotImplementedError(
-                "unable to extract drupal version",
+                "unable to extract drupal/core version",
                 legacy.composer_lock_file,
             )
         subprocess.check_call(
@@ -532,6 +628,7 @@ def judge_files(
             ],
             universal_newlines=True,
         )
+        recommended = ComposerProject(recommended_dir)
 
     leg_cfier = LegacyClassifier()
     leg_cfications = {rp: leg_cfier.classify(rp) for rp in relative_walk(legacy_dir)}
@@ -572,6 +669,29 @@ def judge_files(
                 **{k: v for k, v in rec_quals.__dict__.items() if v is not None},
             ),
         )
+        vj = judgements[leg_relpath]
+
+        leg_guessed_name = legacy.guess_package(leg_relpath)
+        rec_guessed_name = recommended.guess_package(rec_relpath)
+        vj.package_guess = leg_guessed_name or rec_guessed_name or None
+
+        if leg_guessed_name:
+            if vj.libraries:
+                vj.library = leg_guessed_name
+            if vj.modules:
+                vj.module = leg_guessed_name
+            if vj.profiles:
+                vj.profile = leg_guessed_name
+            if vj.themes:
+                vj.theme = leg_guessed_name
+
+        leg_guess = legacy.get_installed_package_by_name(leg_guessed_name)
+        if leg_guess:
+            vj.legacy_version = leg_guess.version
+
+        rec_guess = recommended.get_installed_package_by_name(rec_guessed_name)
+        if rec_guess:
+            vj.recommended_version = rec_guess.version
 
     for rec_relpath, rec_quals in rec_cfications.items():
         rec_file = recommended_dir / rec_relpath
