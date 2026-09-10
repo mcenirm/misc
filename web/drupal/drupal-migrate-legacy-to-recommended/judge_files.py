@@ -48,15 +48,16 @@ class Qualities:
 @dataclasses.dataclass
 class FileMetadata:
     size_bytes: int | None = None
-    mtime: datetime.datetime | None = None
+    mtime_utc: datetime.datetime | None = None
 
     def set_from_path(self, path: pathlib.Path):
         if path.exists():
             st = path.stat(follow_symlinks=False)
             self.size_bytes = st.st_size
-            self.mtime = datetime.datetime.fromtimestamp(
-                st.st_mtime, tz=datetime.timezone.utc
-            )
+            self.mtime_utc = datetime.datetime.fromtimestamp(
+                int(st.st_mtime),
+                tz=datetime.timezone.utc,
+            ).replace(tzinfo=None)
 
 
 @dataclasses.dataclass
@@ -434,10 +435,9 @@ class Judgements:
         vj = self[relpath]
         vj.actual.set_from_path(contestant_file)
         vj.expected.set_from_path(role_model_file)
-        if vj.expected.size_bytes != vj.actual.size_bytes:
-            vj.changed = True
-        if vj.expected.mtime != vj.actual.mtime:
-            vj.drifted = True
+        if contestant_file.exists and role_model_file.exists:
+            vj.changed = vj.expected.size_bytes != vj.actual.size_bytes
+            vj.drifted = vj.expected.mtime_utc != vj.actual.mtime_utc
 
     def qualities(self, relpath: str, q: Qualities):
         vj = self[relpath]
