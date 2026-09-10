@@ -465,12 +465,12 @@ class RecommendedClassifier(Classifier):
 
 
 @dataclasses.dataclass
-class Judgements:
+class Judgments:
     judgments: dict[str, ValueJudgment] = dataclasses.field(default_factory=dict)
 
-    def load_judgments_csv(self, judgements_csv: pathlib.Path):
-        judgements_csv = pathlib.Path(judgements_csv)
-        with judgements_csv.open("r", encoding="utf-8", newline=None) as f:
+    def load_judgments_csv(self, judgments_csv: pathlib.Path):
+        judgments_csv = pathlib.Path(judgments_csv)
+        with judgments_csv.open("r", encoding="utf-8", newline=None) as f:
             rdr = csv.DictReader(f)
             for row in rdr:
                 self.judgments[row["relative_path"]] = ValueJudgment(
@@ -486,9 +486,9 @@ class Judgements:
                     )
                 )
 
-    def save_judgments_csv(self, judgements_csv):
-        judgements_csv = pathlib.Path(judgements_csv)
-        with judgements_csv.open("w", encoding="utf-8", newline=None) as f:
+    def save_judgments_csv(self, judgments_csv):
+        judgments_csv = pathlib.Path(judgments_csv)
+        with judgments_csv.open("w", encoding="utf-8", newline=None) as f:
             wrtr = csv.DictWriter(
                 f,
                 flatten_dict(
@@ -637,9 +637,9 @@ def judge_files(
         rp: rec_cfier.classify(rp) for rp in relative_walk(recommended_dir)
     }
 
-    judgements = Judgements()
+    judgments = Judgments()
     if judgments_csv.exists():
-        judgements.load_judgments_csv(judgments_csv)
+        judgments.load_judgments_csv(judgments_csv)
 
     for leg_relpath, leg_quals in leg_cfications.items():
         leg_file = legacy_dir / leg_relpath
@@ -657,19 +657,19 @@ def judge_files(
         if rec_relpath in rec_cfications:
             rec_quals = rec_cfications.pop(rec_relpath)
             rec_file = rec_dir / rec_relpath  # type: ignore
-            judgements.compare(leg_relpath, leg_file, rec_file)
+            judgments.compare(leg_relpath, leg_file, rec_file)
         else:
             rec_quals = Qualities()
-            judgements.added(leg_relpath, leg_file)
+            judgments.added(leg_relpath, leg_file)
 
-        judgements.qualities(
+        judgments.qualities(
             leg_relpath,
             dataclasses.replace(
                 leg_quals,
                 **{k: v for k, v in rec_quals.__dict__.items() if v is not None},
             ),
         )
-        vj = judgements[leg_relpath]
+        vj = judgments[leg_relpath]
 
         leg_guessed_name = legacy.guess_package(leg_relpath)
         rec_guessed_name = recommended.guess_package(rec_relpath)
@@ -695,12 +695,12 @@ def judge_files(
 
     for rec_relpath, rec_quals in rec_cfications.items():
         rec_file = recommended_dir / rec_relpath
-        judgements.missing(rec_relpath, rec_file)
-        judgements.qualities(rec_relpath, rec_quals)
+        judgments.missing(rec_relpath, rec_file)
+        judgments.qualities(rec_relpath, rec_quals)
 
     if judgments_csv.exists():
         judgments_csv.rename(judgments_csv.with_suffix(".bak"))
-    judgements.save_judgments_csv(judgments_csv)
+    judgments.save_judgments_csv(judgments_csv)
 
 
 ############################################################
