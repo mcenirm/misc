@@ -61,10 +61,10 @@ class FileMetadata:
 @dataclasses.dataclass
 class ValueJudgment(Qualities, SomethingThatHasARelativePath):
     added: bool | None = None
-    changed: bool | None = None
     custom: bool | None = None
-    drifted: bool | None = None
     missing: bool | None = None
+    size_changed: bool | None = None
+    mtime_changed: bool | None = None
 
     actual: FileMetadata = dataclasses.field(default_factory=FileMetadata)
     expected: FileMetadata = dataclasses.field(default_factory=FileMetadata)
@@ -532,8 +532,8 @@ class Judgments:
         vj.actual.set_from_path(contestant_file)
         vj.expected.set_from_path(role_model_file)
         if contestant_file.exists and role_model_file.exists:
-            vj.changed = vj.expected.size_bytes != vj.actual.size_bytes
-            vj.drifted = vj.expected.mtime_utc != vj.actual.mtime_utc
+            vj.size_changed = vj.expected.size_bytes != vj.actual.size_bytes
+            vj.mtime_changed = vj.expected.mtime_utc != vj.actual.mtime_utc
 
     def qualities(self, relpath: str, q: Qualities):
         vj = self[relpath]
@@ -643,21 +643,14 @@ def judge_files(
 
     for leg_relpath, leg_quals in leg_cfications.items():
         leg_file = legacy_dir / leg_relpath
-        rec_relpath = leg_relpath
-        rec_relpath, rec_dir = (
-            (rec_relpath, recommended_dir)
-            if rec_relpath in rec_cfications
-            else (
-                (_rec_web_relpath, recommended_web_dir)
-                if (_rec_web_relpath := recommended_web_relative + leg_relpath)
-                in rec_cfications
-                else (None, None)
-            )
-        )
-        if rec_relpath in rec_cfications:
-            rec_quals = rec_cfications.pop(rec_relpath)
-            rec_file = rec_dir / rec_relpath  # type: ignore
-            judgments.compare(leg_relpath, leg_file, rec_file)
+
+        for rec_prefix in ["", recommended_web_relative]:
+            rec_relpath = rec_prefix + leg_relpath
+            if rec_relpath in rec_cfications:
+                rec_quals = rec_cfications.pop(rec_relpath)
+                rec_file = recommended_dir / rec_relpath  # type: ignore
+                judgments.compare(leg_relpath, leg_file, rec_file)
+                break
         else:
             rec_quals = Qualities()
             judgments.added(leg_relpath, leg_file)
