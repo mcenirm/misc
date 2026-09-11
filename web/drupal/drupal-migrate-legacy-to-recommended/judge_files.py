@@ -244,17 +244,21 @@ class ComposerProject:
         self._install_prefix_to_name: dict[str, str] = {}
         if self.installed.packages:
             for pkg in self.installed.packages:
-                if pkg.name:
-                    if pkg.name in self._installed_name_to_pkg:
-                        raise NotImplementedError(
-                            "installed package name conflict",
-                            pkg.name,
-                            self._installed_name_to_pkg[pkg.name],
-                            pkg,
-                            self.composer_installed_file,
-                        )
-                    else:
-                        self._installed_name_to_pkg[pkg.name] = pkg
+                if pkg.name is None:
+                    raise NotImplementedError(
+                        "package should have a name",
+                        *pkg.__dict__.items(),
+                    )
+                if pkg.name in self._installed_name_to_pkg:
+                    raise NotImplementedError(
+                        "installed package name conflict",
+                        pkg.name,
+                        self._installed_name_to_pkg[pkg.name],
+                        pkg,
+                        self.composer_installed_file,
+                    )
+                else:
+                    self._installed_name_to_pkg[pkg.name] = pkg
                 if pkg.install_path:
                     prefix = self.composer_installed_file.parent / pkg.install_path
                     # "...\home\vendor\composer\../../web/core"
@@ -272,7 +276,7 @@ class ComposerProject:
                         raise NotImplementedError(
                             "installed package install_path conflict",
                             prefix,
-                            self._install_prefix_to_name[prefix].name,
+                            self._install_prefix_to_name[prefix],
                             pkg.name,
                             self.composer_installed_file,
                         )
@@ -281,13 +285,13 @@ class ComposerProject:
 
     def get_installed_package_by_name(
         self,
-        package_name: str,
+        package_name: str | None,
     ) -> ComposerPackageInstalled | None:
         if package_name is None:
             return None
         return self._installed_name_to_pkg.get(package_name)
 
-    def guess_package(self, relative_path: str) -> str | None:
+    def guess_package(self, relative_path: str | None) -> str | None:
         if relative_path is None:
             return None
         candidates = [
@@ -654,6 +658,7 @@ def judge_files(
         else:
             rec_quals = Qualities()
             judgments.added(leg_relpath, leg_file)
+            rec_relpath = None
 
         judgments.qualities(
             leg_relpath,
