@@ -13,17 +13,30 @@ def argument_parser_from_function(
 ) -> argparse.ArgumentParser:
     s = inspect.signature(f)
     h = typing.get_type_hints(f)
-    _ = h.pop("return", None)
     ap = argparse.ArgumentParser(
-        description=f.__doc__,
+        description=inspect.getdoc(f),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    for n, t in h.items():
-        opt = "--" + n.replace("_", "-")
-        kw = dict(type=t)
-        if s.parameters[n].default is not inspect.Parameter.empty:
-            kw["default"] = s.parameters[n].default
-            kw["help"] = n.replace("_", " ")
+    for name, param in s.parameters.items():
+        if param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+        opt = "--" + name.replace("_", "-")
+        kw: dict[str, typing.Any] = {}
+        param_type = h.get(name, str)
+        if param_type is bool:
+            if param.default is False or param.default is inspect.Parameter.empty:
+                kw["action"] = "store_true"
+            else:
+                kw["action"] = "store_false"
+        else:
+            kw["type"] = param_type
+            if param.default is not inspect.Parameter.empty:
+                kw["default"] = param.default
+            else:
+                kw["required"] = True
         ap.add_argument(opt, **kw)
     return ap
 
