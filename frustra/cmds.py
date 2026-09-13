@@ -1,6 +1,7 @@
 import argparse
 import collections.abc
 import dataclasses
+import doctest
 import inspect
 import re
 import shlex
@@ -8,15 +9,52 @@ import traceback
 import typing
 
 
-def argument_parser_from_function(
+class _arguments_for_add_argument(typing.NamedTuple):
+    name_or_flags: tuple[str, ...]
+    kwargs: dict[str, typing.Any]
+
+    def __str__(self) -> str:
+        s = ", ".join(map(repr, self.name_or_flags))
+        for k, v in sorted(self.kwargs.items()):
+            if isinstance(v, type):
+                qname = getattr(v, "__qualname__", v.__name__)
+                modname = getattr(v, "__module__", "builtins")
+                if modname != "builtins":
+                    qname = modname + "." + qname
+                v = qname
+            else:
+                v = repr(v)
+            s += f", {k}={v}"
+        return s
+
+
+def _arguments_from_function(
     f: collections.abc.Callable[..., typing.Any],
-) -> argparse.ArgumentParser:
+) -> list[_arguments_for_add_argument]:
+    """
+    >>> t = lambda f: [str(a) for a in _arguments_from_function(f)]
+
+    >>> def simple(a: int, b: str): ...
+    >>> t(simple)
+    ["'--a', required=True, type=int", "'--b', required=True, type=str"]
+
+    >>> def withdefault(c: str="something"): ...
+    >>> t(withdefault)
+    ["'--c', default='something', type=str"]
+
+    >>> def withbool(d: bool=False): ...
+    >>> t(withbool)
+    ["'--d', action='store_true'"]
+
+    >>> def withbooldefaulttrue(e: bool=True): ...
+    >>> t(withbooldefaulttrue)
+    ["'--e', action='store_false'"]
+
+    """
+
+    args = []
     s = inspect.signature(f)
     h = typing.get_type_hints(f)
-    ap = argparse.ArgumentParser(
-        description=inspect.getdoc(f),
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
     for name, param in s.parameters.items():
         if param.kind in (
             inspect.Parameter.VAR_POSITIONAL,
@@ -37,7 +75,25 @@ def argument_parser_from_function(
                 kw["default"] = param.default
             else:
                 kw["required"] = True
-        ap.add_argument(opt, **kw)
+        args.append(
+            _arguments_for_add_argument(
+                name_or_flags=(opt,),
+                kwargs=kw,
+            )
+        )
+    return args
+
+
+def argument_parser_from_function(
+    f: collections.abc.Callable[..., typing.Any],
+) -> argparse.ArgumentParser:
+    argargs = _arguments_from_function(f)
+    ap = argparse.ArgumentParser(
+        description=inspect.getdoc(f),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    for aa in argargs:
+        ap.add_argument(*aa.name_or_flags, **aa.kwargs)
     return ap
 
 
@@ -129,3 +185,7 @@ def meighn(
         print()
         print(traceback.format_exception(e)[-2])
         print()
+
+
+if __name__ == "__main__":
+    doctest.testmod(optionflags=doctest.ELLIPSIS | doctest.FAIL_FAST)
