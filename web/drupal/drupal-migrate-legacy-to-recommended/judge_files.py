@@ -586,6 +586,7 @@ def unflatten_dict(d: dict, sep: str = ".") -> dict:
 
 def judge_files(
     judgments_csv: pathlib.Path,
+    scratch_dir: pathlib.Path,
     legacy_dir: pathlib.Path,
     recommended_dir: pathlib.Path,
     recommended_web_relative: str = "web/",
@@ -707,20 +708,52 @@ def judge_files(
 def argument_parser_from_function(
     f: collections.abc.Callable[..., typing.Any],
 ) -> argparse.ArgumentParser:
-    s = inspect.signature(f)
-    h = typing.get_type_hints(f)
-    _ = h.pop("return", None)
+
+    class _arguments_for_add_argument(typing.NamedTuple):
+        name_or_flags: tuple[str, ...]
+        kwargs: dict[str, typing.Any]
+
+    def _arguments_from_function(
+        f: collections.abc.Callable[..., typing.Any],
+    ) -> list[_arguments_for_add_argument]:
+        args = []
+        s = inspect.signature(f)
+        h = typing.get_type_hints(f)
+        for name, param in s.parameters.items():
+            if param.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                continue
+            opt = "--" + name.replace("_", "-")
+            kw: dict[str, typing.Any] = {}
+            param_type = h.get(name, str)
+            if param_type is bool:
+                if param.default is False or param.default is inspect.Parameter.empty:
+                    kw["action"] = "store_true"
+                else:
+                    kw["action"] = "store_false"
+            else:
+                kw["type"] = param_type
+                if param.default is not inspect.Parameter.empty:
+                    kw["default"] = param.default
+                else:
+                    kw["required"] = True
+            args.append(
+                _arguments_for_add_argument(
+                    name_or_flags=(opt,),
+                    kwargs=kw,
+                )
+            )
+        return args
+
+    argargs = _arguments_from_function(f)
     ap = argparse.ArgumentParser(
-        description=f.__doc__,
+        description=inspect.getdoc(f),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    for n, t in h.items():
-        opt = "--" + n.replace("_", "-")
-        kw = dict(type=t)
-        if s.parameters[n].default is not inspect.Parameter.empty:
-            kw["default"] = s.parameters[n].default
-            kw["help"] = n.replace("_", " ")
-        ap.add_argument(opt, **kw)
+    for aa in argargs:
+        ap.add_argument(*aa.name_or_flags, **aa.kwargs)
     return ap
 
 
