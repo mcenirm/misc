@@ -592,6 +592,7 @@ def judge_files(
     recommended_web_relative: str = "web/",
 ):
     judgments_csv = pathlib.Path(judgments_csv)
+    scratch_dir = pathlib.Path(scratch_dir)
     legacy_dir = pathlib.Path(legacy_dir)
     recommended_dir = pathlib.Path(recommended_dir)
     recommended_web_relative = recommended_web_relative.rstrip("/") + "/"
@@ -604,6 +605,8 @@ def judge_files(
             "could not find name of legacy project",
             legacy.composer_json_file,
         )
+
+    cloned = legacy.clone_to(scratch_dir / "cloned")
 
     recommended = ComposerProject(recommended_dir)
     if recommended.package.name is None:
