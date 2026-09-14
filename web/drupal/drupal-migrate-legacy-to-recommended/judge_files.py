@@ -387,56 +387,164 @@ def composer_json_keys_to_python_identifiers(data):
     return data
 
 
+def _composer_run(
+    command: str,
+    args: list[str],
+    verbose: typing.Literal[1, 2, 3] | None = None,
+    plugins: bool = True,
+    scripts: bool = True,
+    cache: bool = True,
+    working_dir: pathlib.Path | None = None,
+) -> int:
+    args = [
+        "composer",
+        str(command),
+        *(str(a) for a in args),
+    ]
+
+    if not verbose:
+        if isinstance(verbose, int):
+            v = "-v"
+            if verbose > 1:
+                v += "v"
+            if verbose > 2:
+                v += "v"
+        elif verbose:
+            v = "-v"
+        if v:
+            args.append(v)
+    else:
+        args.append("--quiet")
+    if not plugins:
+        args.append("--no-plugins")
+    if not scripts:
+        args.append("--no-scripts")
+    if not cache:
+        args.append("--no-cache")
+    if working_dir is not None:
+        working_dir = pathlib.Path(working_dir)
+        args.append(f"--working-dir={working_dir}")
+
+    args.append("--no-ansi")
+    args.append("--no-interaction")
+    args.append("--no-progress")
+
+    return subprocess.check_call(
+        args,
+        universal_newlines=True,
+    )
+
+
 def composer_create_project(
     package: str,
     directory: pathlib.Path | None = None,
     version: str = "latest",
     *,
-    stability: typing.Literal[
-        "dev",
-        "alpha",
-        "beta",
-        "RC",
-        "stable",
-    ] = "stable",
+    stability: typing.Literal["dev", "alpha", "beta", "RC", "stable"] = "stable",
     prefer_install: typing.Literal["dist", "source", "auto"] = "dist",
     repository: list[str] | None = None,
-    add_repository: str | None = None,
+    add_repository: bool = False,
     require: list[str] | None = None,
     dev: bool = True,
-    scripts: bool = True,
     secure_http: bool = True,
-    # keep-vcs                                 Whether to prevent deleting the vcs folder.
-    # remove-vcs                               Whether to force deletion of the vcs folder without prompting.
-    # no-install                               Whether to skip installation of the package dependencies.
-    # no-audit                                 Whether to skip auditing of the installed package dependencies (can also be set via the COMPOSER_NO_AUDIT=1 env var).
-    # audit-format=AUDIT-FORMAT                Audit output format. Must be "table", "plain", "json" or "summary". [default: "summary"]
-    # no-blocking                              Disables all policy blocking during this command (can also be set via the COMPOSER_NO_BLOCKING=1 env var).
-    # ignore-platform-req=IGNORE-PLATFORM-REQ  Ignore a specific platform requirement (php & ext- packages). (multiple values allowed)
-    # ignore-platform-reqs                     Ignore all platform requirements (php & ext- packages).
-    # quiet                                    Do not output any message
-    # ansi|--no-ansi                           Force (or disable --no-ansi) ANSI output
-    # no-interaction                           Do not ask any interactive question
-    # no-progress                              Do not output download progress.
-    # no-plugins                               Whether to disable plugins.
-    # working-dir=WORKING-DIR                  If specified, use the given directory as working directory.
-    # no-cache                                 Prevent use of the cache
-    # -v|vv|vvv, --verbose                           Increase the verbosity of messages: 1 for normal output, 2 for more verbose output and 3 for debug
+    keep_vcs: bool = False,
+    remove_vcs: bool = False,
+    install: bool = True,
+    audit: bool = True,
+    audit_format: typing.Literal["table", "plain", "json", "summary"] = "summary",
+    blocking: bool = True,
+    ignore_platform_req: bool | list[str] | None = None,
+    verbose: typing.Literal[1, 2, 3] | None = None,
+    plugins: bool = True,
+    scripts: bool = True,
+    cache: bool = True,
+    working_dir: pathlib.Path | None = None,
 ) -> ComposerProject:
     """Creates new project from a package into given directory"""
 
-    subprocess.check_call(
-        [
-            "composer",
-            "create-project",
-            f"drupal/recommended-project:{legacy_locked_version}",
-            str(recommended_dir),
-            "--ignore-platform-reqs",
-            "--no-ansi",
-            "--no-interaction",
-        ],
-        universal_newlines=True,
+    if not isinstance(package, str):
+        raise TypeError("package should be str", package)
+
+    args = []
+    args.append(package)
+    if directory is not None:
+        directory = pathlib.Path(directory)
+        args.append(str(directory))
+    if version is not None:
+        args.append(str(version))
+
+    if stability != "stable":
+        args.append(f"--stability={stability}")
+    if prefer_install != "dist":
+        args.append(f"--prefer-install={prefer_install}")
+    if repository is not None:
+        if isinstance(repository, (str, bytes)) or not isinstance(
+            repository, collections.abc.Sequence
+        ):
+            repository = [repository]
+        args.extend([f"--repository={r}" for r in repository])
+    if add_repository:
+        args.append("--add-repository")
+    if require is not None:
+        if isinstance(require, (str, bytes)) or not isinstance(
+            require, collections.abc.Sequence
+        ):
+            require = [require]
+        args.extend([f"--require={r}" for r in require])
+    if not dev:
+        args.append("--no-dev")
+    if not secure_http:
+        args.append("--no-secure-http")
+    if keep_vcs:
+        args.append("--keep-vcs")
+    if remove_vcs:
+        args.append("--remove-vcs")
+    if not install:
+        args.append("--no-install")
+    if not audit:
+        args.append("--no-audit")
+    if audit_format != "summary":
+        args.append(f"--audit-format={audit_format}")
+    if not blocking:
+        args.append("--no-blocking")
+    if ignore_platform_req is not None:
+        if isinstance(ignore_platform_req, bool):
+            if ignore_platform_req:
+                args.append("--ignore-platform-reqs")
+        else:
+            if isinstance(ignore_platform_req, (str, bytes)) or not isinstance(
+                ignore_platform_req, collections.abc.Sequence
+            ):
+                ignore_platform_req = [ignore_platform_req]
+            args.extend([f"--ignore-platform-req={r}" for r in ignore_platform_req])
+
+    # determine where the project will be created
+    if directory:
+        resulting_dir = directory
+    else:
+        if ":" in package:
+            p, _, _ = package.partition(":")
+        else:
+            p = package
+        if "/" in p:
+            _, _, resulting_dir = p.partition("/")
+        else:
+            resulting_dir = p
+    if working_dir is not None:
+        working_dir = pathlib.Path(working_dir)
+        resulting_dir = working_dir / resulting_dir
+
+    _composer_run(
+        "create-project",
+        args,
+        verbose=verbose,
+        plugins=plugins,
+        scripts=scripts,
+        cache=cache,
+        working_dir=working_dir,
     )
+
+    return ComposerProject(project_dir=resulting_dir)
 
 
 ############################################################
