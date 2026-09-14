@@ -310,6 +310,16 @@ class ComposerProject:
             *candidates,
         )
 
+    def clone_to(self, dest: pathlib.Path) -> ComposerProject:
+        dest = pathlib.Path(dest)
+        if dest.exists():
+            raise NotImplementedError(
+                "clone destination should not exist",
+                dest,
+            )
+        dest.mkdir()
+        return composer_create_project(...)
+
 
 def from_composer_file[T](cls: type[T], path: pathlib.Path) -> T:
     path = pathlib.Path(path)
@@ -375,6 +385,58 @@ def composer_json_keys_to_python_identifiers(data):
     if isinstance(data, list):
         return [composer_json_keys_to_python_identifiers(item) for item in data]
     return data
+
+
+def composer_create_project(
+    package: str,
+    directory: pathlib.Path | None = None,
+    version: str = "latest",
+    *,
+    stability: typing.Literal[
+        "dev",
+        "alpha",
+        "beta",
+        "RC",
+        "stable",
+    ] = "stable",
+    prefer_install: typing.Literal["dist", "source", "auto"] = "dist",
+    repository: list[str] | None = None,
+    add_repository: str | None = None,
+    require: list[str] | None = None,
+    dev: bool = True,
+    scripts: bool = True,
+    secure_http: bool = True,
+    # keep-vcs                                 Whether to prevent deleting the vcs folder.
+    # remove-vcs                               Whether to force deletion of the vcs folder without prompting.
+    # no-install                               Whether to skip installation of the package dependencies.
+    # no-audit                                 Whether to skip auditing of the installed package dependencies (can also be set via the COMPOSER_NO_AUDIT=1 env var).
+    # audit-format=AUDIT-FORMAT                Audit output format. Must be "table", "plain", "json" or "summary". [default: "summary"]
+    # no-blocking                              Disables all policy blocking during this command (can also be set via the COMPOSER_NO_BLOCKING=1 env var).
+    # ignore-platform-req=IGNORE-PLATFORM-REQ  Ignore a specific platform requirement (php & ext- packages). (multiple values allowed)
+    # ignore-platform-reqs                     Ignore all platform requirements (php & ext- packages).
+    # quiet                                    Do not output any message
+    # ansi|--no-ansi                           Force (or disable --no-ansi) ANSI output
+    # no-interaction                           Do not ask any interactive question
+    # no-progress                              Do not output download progress.
+    # no-plugins                               Whether to disable plugins.
+    # working-dir=WORKING-DIR                  If specified, use the given directory as working directory.
+    # no-cache                                 Prevent use of the cache
+    # -v|vv|vvv, --verbose                           Increase the verbosity of messages: 1 for normal output, 2 for more verbose output and 3 for debug
+) -> ComposerProject:
+    """Creates new project from a package into given directory"""
+
+    subprocess.check_call(
+        [
+            "composer",
+            "create-project",
+            f"drupal/recommended-project:{legacy_locked_version}",
+            str(recommended_dir),
+            "--ignore-platform-reqs",
+            "--no-ansi",
+            "--no-interaction",
+        ],
+        universal_newlines=True,
+    )
 
 
 ############################################################
@@ -624,19 +686,14 @@ def judge_files(
                 "unable to extract drupal/core version",
                 legacy.composer_lock_file,
             )
-        subprocess.check_call(
-            [
-                "composer",
-                "create-project",
-                f"drupal/recommended-project:{legacy_locked_version}",
-                str(recommended_dir),
-                "--ignore-platform-reqs",
-                "--no-ansi",
-                "--no-interaction",
-            ],
-            universal_newlines=True,
+        recommended = composer_create_project(
+            package="drupal/recommended-project",
+            directory=recommended_dir,
+            version=legacy_locked_version,
+            ignore_platform_reqs=True,
+            ansi=False,
+            interaction=False,
         )
-        recommended = ComposerProject(recommended_dir)
 
     leg_cfier = LegacyClassifier()
     leg_cfications = {rp: leg_cfier.classify(rp) for rp in relative_walk(legacy_dir)}
