@@ -13,6 +13,7 @@ import json
 import operator
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 import traceback
@@ -151,6 +152,7 @@ class ComposerPackageConfig:
 
 @dataclasses.dataclass
 class ComposerPackage:
+    abandoned: bool | str | None = None
     config: ComposerPackageConfig | None = None
     conflict: dict[str, str] | None = None
     description: str | None = None
@@ -311,6 +313,9 @@ class ComposerProject:
         )
 
     def clone_to(self, dest: pathlib.Path) -> ComposerProject:
+        if self.package.name is None:
+            raise NotImplementedError("cannot clone an unknown package", self)
+
         dest = pathlib.Path(dest)
         if dest.exists():
             raise NotImplementedError(
@@ -318,7 +323,21 @@ class ComposerProject:
                 dest,
             )
         dest.mkdir()
-        return composer_create_project(...)
+
+        kw = {}
+
+        installed_self = self.get_installed_package_by_name(self.package.name)
+        if installed_self:
+            kw["version"] = installed_self.version
+
+        return composer_create_project(
+            self.package.name,
+            dest,
+            install=False,
+            ignore_platform_req=True,
+            blocking=False,
+            **kw,
+        )
 
 
 def from_composer_file[T](cls: type[T], path: pathlib.Path) -> T:
@@ -403,6 +422,7 @@ def _composer_run(
     ]
 
     if not verbose:
+        v = ""
         if isinstance(verbose, int):
             v = "-v"
             if verbose > 1:
@@ -429,6 +449,10 @@ def _composer_run(
     args.append("--no-interaction")
     args.append("--no-progress")
 
+    print("#", shlex.quote(args[0]))
+    for a in args[1:]:
+        print("#    ", shlex.quote(a), "\\")
+
     return subprocess.check_call(
         args,
         universal_newlines=True,
@@ -438,7 +462,7 @@ def _composer_run(
 def composer_create_project(
     package: str,
     directory: pathlib.Path | None = None,
-    version: str = "latest",
+    version: str | None = None,
     *,
     stability: typing.Literal["dev", "alpha", "beta", "RC", "stable"] = "stable",
     prefer_install: typing.Literal["dist", "source", "auto"] = "dist",
@@ -477,20 +501,12 @@ def composer_create_project(
         args.append(f"--stability={stability}")
     if prefer_install != "dist":
         args.append(f"--prefer-install={prefer_install}")
-    if repository is not None:
-        if isinstance(repository, (str, bytes)) or not isinstance(
-            repository, collections.abc.Sequence
-        ):
-            repository = [repository]
-        args.extend([f"--repository={r}" for r in repository])
+    for r in _listify(repository):
+        args.append(f"--repository={r}")
     if add_repository:
         args.append("--add-repository")
-    if require is not None:
-        if isinstance(require, (str, bytes)) or not isinstance(
-            require, collections.abc.Sequence
-        ):
-            require = [require]
-        args.extend([f"--require={r}" for r in require])
+    for r in _listify(require):
+        args.append(f"--require={r}")
     if not dev:
         args.append("--no-dev")
     if not secure_http:
@@ -507,16 +523,12 @@ def composer_create_project(
         args.append(f"--audit-format={audit_format}")
     if not blocking:
         args.append("--no-blocking")
-    if ignore_platform_req is not None:
-        if isinstance(ignore_platform_req, bool):
-            if ignore_platform_req:
-                args.append("--ignore-platform-reqs")
-        else:
-            if isinstance(ignore_platform_req, (str, bytes)) or not isinstance(
-                ignore_platform_req, collections.abc.Sequence
-            ):
-                ignore_platform_req = [ignore_platform_req]
-            args.extend([f"--ignore-platform-req={r}" for r in ignore_platform_req])
+    if isinstance(ignore_platform_req, bool):
+        if ignore_platform_req:
+            args.append("--ignore-platform-reqs")
+    else:
+        for r in _listify(ignore_platform_req):
+            args.append(f"--ignore-platform-req={r}")
 
     # determine where the project will be created
     if directory:
@@ -530,6 +542,7 @@ def composer_create_project(
             _, _, resulting_dir = p.partition("/")
         else:
             resulting_dir = p
+        resulting_dir = pathlib.Path(resulting_dir)
     if working_dir is not None:
         working_dir = pathlib.Path(working_dir)
         resulting_dir = working_dir / resulting_dir
@@ -545,6 +558,16 @@ def composer_create_project(
     )
 
     return ComposerProject(project_dir=resulting_dir)
+
+
+def _listify(obj: typing.Any) -> list:
+    if obj is None:
+        return []
+    if isinstance(obj, (str, bytes)):
+        return [obj]
+    if isinstance(obj, collections.abc.Sequence):
+        return list(obj)
+    return [obj]
 
 
 ############################################################
