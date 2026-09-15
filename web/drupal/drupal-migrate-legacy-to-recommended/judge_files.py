@@ -14,6 +14,7 @@ import operator
 import os
 import pathlib
 import shlex
+import shutil
 import subprocess
 import sys
 import traceback
@@ -323,7 +324,9 @@ class ComposerProject:
                 dest,
             )
         dest.mkdir()
-
+        for f in [self.composer_json_file, self.composer_lock_file]:
+            shutil.copyfile(f, dest / f.name)
+        raise TODO("now what???")
         kw = {}
 
         installed_self = self.get_installed_package_by_name(self.package.name)
