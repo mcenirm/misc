@@ -1,4 +1,5 @@
 import ast
+import collections
 import dataclasses
 import fnmatch
 import glob
@@ -10,24 +11,24 @@ import typing
 
 import black
 import dacite
-
 import frustra.cmds
 import frustra.strings
+from frozendict import frozendict
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class ComposerApplication:
     name: str
     version: str
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class ComposerNamespace:
     id: str
-    commands: list[str]
+    commands: tuple[str, ...]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class ComposerCommandArgument:
     name: str
     is_required: bool
@@ -36,7 +37,31 @@ class ComposerCommandArgument:
     default: str | None
 
 
-@dataclasses.dataclass
+COMPOSER_GLOBAL_OPTIONS = [
+    "--help",
+    "--quiet",
+    "--verbose",
+    "--version",
+    "--ansi",
+    "--no-ansi",
+    "--no-interaction",
+    "--profile",
+    "--no-plugins",
+    "--no-scripts",
+    "--working-dir",
+    "--no-cache",
+]
+COMPOSER_IGNORE_OPTIONS = [
+    "--help",
+    "--version",
+    "--ansi",
+    "--no-ansi",
+    "--no-interaction",
+    "--profile",
+]
+
+
+@dataclasses.dataclass(frozen=True)
 class ComposerCommandOption:
     name: str
     shortcut: str
@@ -44,30 +69,45 @@ class ComposerCommandOption:
     is_value_required: bool
     is_multiple: bool
     description: str
-    default: bool | str | list[bool] | None
+    default: bool | str | None
+    is_global: bool = dataclasses.field(init=False)
+    ignore: bool = dataclasses.field(init=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, "is_global", self.name in COMPOSER_GLOBAL_OPTIONS)
+        object.__setattr__(self, "ignore", self.name in COMPOSER_IGNORE_OPTIONS)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class ComposerCommandDefinition:
-    arguments: dict[str, ComposerCommandArgument]
-    options: dict[str, ComposerCommandOption]
+    arguments: frozendict[str, ComposerCommandArgument]
+    options: frozendict[str, ComposerCommandOption]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class ComposerCommand:
     name: str
     description: str
-    usage: list[str]
+    usage: tuple[str, ...]
     help: str
     definition: ComposerCommandDefinition
     hidden: bool
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class ComposerListOutput:
     application: ComposerApplication
-    commands: list[ComposerCommand]
-    namespaces: list[ComposerNamespace]
+    commands: tuple[ComposerCommand, ...]
+    namespaces: tuple[ComposerNamespace, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class WrapperArgument:
+    id: str
+    type: type
+    default: str
+    cond: str
+    argsappend: str
 
 
 def composer_help_id_to_python_id(id: str) -> str:
@@ -102,8 +142,13 @@ def _from_composer_json_output[T](
         json.loads(jsontext),
         config=dacite.Config(
             type_hooks={
-                str: lambda v: None if v == [] else v,
-                dict[str, ComposerCommandArgument]: lambda v: {} if v == [] else v,
+                str | None: lambda v: None if v == [] else v,
+                bool | str | None: lambda v: None if v == [] else v,
+                frozendict[str, ComposerCommandArgument]: frozendict,
+                frozendict[str, ComposerCommandOption]: frozendict,
+                tuple[str, ...]: tuple,
+                tuple[ComposerCommand, ...]: tuple,
+                tuple[ComposerNamespace, ...]: tuple,
             },
             strict=True,
         ),
@@ -127,6 +172,22 @@ def composer_help_to_python_function(
             ).commands
             if fnmatch.fnmatch(c.name, command_name)
         ]
+        arg_name_to_command_list = collections.defaultdict(list)
+        opt_name_to_command_list = collections.defaultdict(list)
+        for c in commands:
+            for n, a in c.definition.arguments.items():
+                arg_name_to_command_list[n].append(c.name)
+            for n, o in c.definition.options.items():
+                opt_name_to_command_list[n].append(c.name)
+        raise TODO(
+            *sorted((len(v), k) for k, v in arg_name_to_command_list.items()),
+            "-------------",
+            *sorted((len(v), k) for k, v in opt_name_to_command_list.items()),
+            "-------------",
+            *commands[0].definition.options["ansi"].__dict__.items(),
+            "-------------",
+            *commands[0].definition.options["no-ansi"].__dict__.items(),
+        )
     else:
         commands = [
             _from_composer_json_output(
@@ -141,104 +202,152 @@ def composer_help_to_python_function(
 
     for info in commands:
         fname = composer_help_id_to_python_id("composer-" + info.name)
-        list_of_posonlyargs_from_definition = list()
-        list_of_args_from_definition = list()
-        list_of_kwonlyargs_from_definition = list()
-        single_arg_node_referring_to_splat_args = None
-        single_arg_node_referring_to_splat_splat_kwargs = None
-        list_of_default_values_for_keyword_only_arguments = list()
-        list_of_default_values_for_arguments_that_can_be_passed_positionally = list()
-        fbody = list()
-
-        fbody.append(ast.Expr(value=ast.Constant(value=info.description)))
+        fargs = []
 
         for arg_name, arg in info.definition.arguments.items():
             arg_name = composer_help_id_to_python_id(arg_name)
-            if arg.is_array:
-                raise TODO("arg is array", arg_name, *arg.__dict__.items())
-            if arg.is_required:
-                raise TODO("arg is required", arg_name, *arg.__dict__.items())
-            else:
-                arg_annotation = ast.BinOp(
-                    left=ast.Name(id="str"),
-                    op=ast.BitOr(),
-                    right=ast.Constant(value=None),
-                )
-            list_of_args_from_definition.append(
-                ast.arg(
-                    arg=composer_help_id_to_python_id(arg_name),
-                    annotation=arg_annotation,
-                )
-            )
-            list_of_default_values_for_arguments_that_can_be_passed_positionally.append(
-                ast.Constant(value=arg.default)
-            )
-            fbody.append(
-                ast.If(
-                    test=ast.UnaryOp(
-                        op=ast.Not(),
-                        operand=ast.Call(
-                            func=ast.Name(id="isinstance"),
-                            args=[
-                                ast.Name(id=arg_name),
-                                ast.Name(id="str"),
-                            ],
-                        ),
-                    ),
-                    body=[
-                        ast.Raise(
-                            exc=ast.Call(
-                                func=ast.Name(id="TypeError"),
-                                args=[
-                                    ast.Constant(value=f"{arg_name} should be str"),
-                                    ast.Name(id=arg_name),
-                                ],
-                            )
-                        )
-                    ],
-                )
-            )
 
-        fbody.append(
-            ast.Assign(
-                targets=[
-                    ast.Name(
-                        id="args",
-                        ctx=ast.Store(),
+            if (
+                arg.is_required is True
+                and arg.is_array is False
+                and arg.default is None
+            ):
+                raise TODO("arg", "is_required=True", "is_array=False", "default=None")
+
+            if (
+                arg.is_required is False
+                and arg.is_array is True
+                and arg.default is None
+            ):
+                raise TODO("arg", "is_required=False", "is_array=True", "default=None")
+
+            if (
+                arg.is_required is False
+                and arg.is_array is False
+                and isinstance(arg.default, str)
+            ):
+                fargs.append(
+                    WrapperArgument(
+                        id=arg_name,
+                        type=str | None,
+                        default=repr(arg.default),
+                        cond=f"{arg_name} is not None and {arg_name} != {arg.default!r}",
+                        argsappend=arg_name,
                     )
-                ],
-                value=ast.List(),
-            )
-        )
+                )
+
+            if (
+                arg.is_required is False
+                and arg.is_array is False
+                and arg.default is None
+            ):
+                raise TODO("arg", "is_required=False", "is_array=False", "default=None")
+
+            if arg.is_required is True and arg.is_array is True and arg.default is None:
+                raise TODO("arg", "is_required=True", "is_array=True", "default=None")
 
         for opt_name, opt in info.definition.options.items():
             opt_name = composer_help_id_to_python_id(opt_name)
-            if opt.accept_value ^ opt.is_value_required:
+
+            if (
+                opt.accept_value is True
+                and opt.is_value_required is True
+                and opt.is_multiple is False
+                and opt.default is None
+                or isinstance(opt.default, str)
+            ):
+                fargs.append(
+                    WrapperArgument(
+                        id=opt_name,
+                        type=str | None if opt.default is None else str,
+                        default=repr(opt.default),
+                        cond=f"{opt_name} is not None"
+                        + (
+                            ""
+                            if opt.default is None
+                            else f" and {opt_name} != {opt.default!r}"
+                        ),
+                        argsappend=f"{opt.name}={{{opt_name}}}",
+                    )
+                )
+
+            if (
+                opt.accept_value is True
+                and opt.is_value_required is True
+                and opt.is_multiple is True
+                and opt.default is None
+            ):
                 raise TODO(
-                    "option accept_value and is_value_required do not match",
-                    opt_name,
+                    "opt",
+                    "accept_value=True",
+                    "is_value_required=True",
+                    "is_multiple=True",
+                    "default=None",
                     *opt.__dict__.items(),
                 )
-            opt_default = None
-            if opt.accept_value:
-                opt_value_type = str
-            else:
-                opt_value_type = bool
-                opt_default = False
-            if opt_default is None:
-                opt_default = opt.default
-            arg_annotation = ast.Name(id=opt_value_type.__name__)
-            if opt.is_multiple:
-                arg_annotation = ast.Subscript(
-                    value=ast.Name(id="list"), slice=arg_annotation
+
+            if (
+                opt.accept_value is True
+                and opt.is_value_required is False
+                and opt.is_multiple is False
+                and opt.default is False
+            ):
+                raise TODO(
+                    "opt",
+                    "accept_value=True",
+                    "is_value_required=False",
+                    "is_multiple=False",
+                    "default=False",
+                    *opt.__dict__.items(),
                 )
-            list_of_kwonlyargs_from_definition.append(
-                ast.arg(arg=opt_name, annotation=arg_annotation)
+
+            if (
+                opt.accept_value is False
+                and opt.is_value_required is False
+                and opt.is_multiple is False
+                and (opt.default is None or isinstance(opt.default, bool))
+            ):
+                fargs.append(
+                    WrapperArgument(
+                        id=opt_name,
+                        type=bool,
+                        default=opt.default,
+                        cond=f"not {opt_name}" if opt.default else opt_name,
+                        argsappend=opt.name,
+                    )
+                )
+
+        indent = " " * 4
+        flines = []
+        flines.append(f"def {fname}(")
+        for a in fargs:
+            flines.append(
+                indent
+                + a.id
+                + " : "
+                + getattr(a.type, "__name__", str(a.type))
+                + " = "
+                + str(a.default)
+                + ","
             )
-            list_of_default_values_for_keyword_only_arguments.append(
-                ast.Constant(value=opt_default)
-            )
-            fbody.append(ast.Expr(value=ast.Constant(value=opt_name)))
+        flines.append("):")
+        flines.append(indent + repr(info.description))
+        flines.append("")
+        flines.append(indent + "args = []")
+
+        for a in fargs:
+            if a.cond:
+                flines.append(indent + "if " + a.cond + ":")
+                if a.argsappend:
+                    flines.append(
+                        indent + indent + "args.append(f'" + a.argsappend + "')"
+                    )
+                else:
+                    flines.append(indent + indent + "pass")
+            else:
+                flines.append(indent + f"# no cond for {a}")
+
+        raise TODO(*flines)
 
         fdef = ast.FunctionDef(
             name=fname,
