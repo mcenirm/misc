@@ -1,8 +1,8 @@
 import ast
-import collections
 import dataclasses
 import fnmatch
 import glob
+import inspect
 import json
 import pathlib
 import subprocess
@@ -23,8 +23,28 @@ class WrapperArgument:
     id: str
     type: type | types.UnionType
     default: typing.Any
-    cond: str
+    cond: str | None
     argsappend: str
+    is_array: bool = False
+
+    def get_signature(self) -> str:
+        parts = [self.id, ":"]
+        if isinstance(self.type, (types.UnionType, types.GenericAlias)):
+            typestr = str(self.type)
+        else:
+            typestr = self.type.__qualname__
+            if self.type not in (str, bool):
+                raise NotImplementedError(
+                    "not sure how to make signature for type (cf __qualname__)",
+                    self.type,
+                    type(self.type),
+                    typestr,
+                )
+        parts.append(typestr)
+        if self.default != inspect.Parameter.empty:
+            parts.append("=")
+            parts.append(repr(self.default))
+        return " ".join(parts)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -48,50 +68,67 @@ class ComposerCommandArgument:
     default: str | None
 
 
-def composer_help_id_to_python_id(id: str) -> str:
-    return frustra.strings.snake_case(id) or ""
+def _composer_command_name_to_function_name(name: str) -> str:
+    return frustra.strings.str_to_identifier(f"composer-{name}")
 
 
-def wrapper_bool_false(composer_option_name: str) -> WrapperArgument:
-    python_id = composer_help_id_to_python_id(composer_option_name.removeprefix("--"))
+def _composer_arg_name_to_python_id(name: str) -> str:
+    return frustra.strings.str_to_identifier(name)
+
+
+def _composer_opt_name_to_python_id(name: str) -> str:
+    return frustra.strings.str_to_identifier(name.removeprefix("--"))
+
+
+def _opt_bool_default_false(
+    composer_option_name: str,
+) -> WrapperArgument:
+    opt_id = _composer_opt_name_to_python_id(composer_option_name)
     return WrapperArgument(
-        id=python_id,
+        id=opt_id,
         type=bool,
         default=False,
-        cond=python_id,
+        cond=opt_id,
         argsappend=f"'{composer_option_name}'",
     )
 
 
-def wrapper_bool_true(composer_option_name: str) -> WrapperArgument:
-    python_id = composer_help_id_to_python_id(
-        composer_option_name.removeprefix("--").removeprefix("no-")
-    )
+def _opt_bool_default_true(composer_option_name: str) -> WrapperArgument:
+    opt_id = _composer_opt_name_to_python_id(composer_option_name.removeprefix("--no-"))
     return WrapperArgument(
-        id=python_id,
+        id=opt_id,
         type=bool,
         default=True,
-        cond=f"not {python_id}",
+        cond=f"not {opt_id}",
         argsappend=f"'{composer_option_name}'",
     )
 
 
-COMPOSER_GLOBAL_OPTIONS = {
-    "--quiet": wrapper_bool_false("--quiet"),
-    "--verbose": wrapper_bool_false("--verbose"),
-    "--no-plugins": wrapper_bool_true("--no-plugins"),
-    "--no-scripts": wrapper_bool_true("--no-scripts"),
-    "--working-dir": WrapperArgument(
-        id="working_dir",
+_COMPOSER_OPTION_QUIET = "--quiet"
+_COMPOSER_OPTION_VERBOSE = "--verbose"
+_COMPOSER_OPTION_NO_PLUGINS = "--no-plugins"
+_COMPOSER_OPTION_NO_SCRIPTS = "--no-scripts"
+_COMPOSER_OPTION_WORKING_DIR = "--working-dir"
+_COMPOSER_OPTION_WORKING_DIR_ID = _composer_opt_name_to_python_id(
+    _COMPOSER_OPTION_WORKING_DIR
+)
+_COMPOSER_OPTION_NO_CACHE = "--no-cache"
+_COMPOSER_GLOBAL_OPTIONS = {
+    _COMPOSER_OPTION_QUIET: _opt_bool_default_false(_COMPOSER_OPTION_QUIET),
+    _COMPOSER_OPTION_VERBOSE: _opt_bool_default_false(_COMPOSER_OPTION_VERBOSE),
+    _COMPOSER_OPTION_NO_PLUGINS: _opt_bool_default_true(_COMPOSER_OPTION_NO_PLUGINS),
+    _COMPOSER_OPTION_NO_SCRIPTS: _opt_bool_default_true(_COMPOSER_OPTION_NO_SCRIPTS),
+    _COMPOSER_OPTION_WORKING_DIR: WrapperArgument(
+        id=_COMPOSER_OPTION_WORKING_DIR_ID,
         type=str | pathlib.Path | None,
         default=None,
-        cond="working_dir is not None",
-        argsappend="f'--working-dir={working_dir}'",
+        cond=f"{_COMPOSER_OPTION_WORKING_DIR_ID} is not None",
+        argsappend=f"f'{_COMPOSER_OPTION_WORKING_DIR}={{{_COMPOSER_OPTION_WORKING_DIR_ID}}}'",
     ),
-    "--no-cache": wrapper_bool_true("--no-cache"),
+    _COMPOSER_OPTION_NO_CACHE: _opt_bool_default_true(_COMPOSER_OPTION_NO_CACHE),
 }
 
-COMPOSER_IGNORE_OPTIONS = [
+_COMPOSER_IGNORE_OPTIONS = [
     "--help",
     "--version",
     "--ansi",
@@ -114,8 +151,8 @@ class ComposerCommandOption:
     ignore: bool = dataclasses.field(init=False)
 
     def __post_init__(self):
-        object.__setattr__(self, "is_global", self.name in COMPOSER_GLOBAL_OPTIONS)
-        object.__setattr__(self, "ignore", self.name in COMPOSER_IGNORE_OPTIONS)
+        object.__setattr__(self, "is_global", self.name in _COMPOSER_GLOBAL_OPTIONS)
+        object.__setattr__(self, "ignore", self.name in _COMPOSER_IGNORE_OPTIONS)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -212,183 +249,227 @@ def composer_help_to_python_function(
         ]
 
     for info in commands:
-        fname = composer_help_id_to_python_id("composer-" + info.name)
-        fargs = []
+        fname = _composer_command_name_to_function_name(info.name)
 
+        fargs = []
         for arg_name, arg in info.definition.arguments.items():
-            arg_name = composer_help_id_to_python_id(arg_name)
+            arg_id = _composer_arg_name_to_python_id(arg.name)
 
             if (
                 arg.is_required is True
                 and arg.is_array is False
                 and arg.default is None
             ):
-                raise TODO(
-                    "arg",
-                    "is_required=True",
-                    "is_array=False",
-                    "default=None",
-                    *arg.__dict__.items(),
+                fargs.append(
+                    WrapperArgument(
+                        id=arg_id,
+                        type=str,
+                        default=inspect.Parameter.empty,
+                        cond=None,
+                        argsappend=arg_id,
+                    )
                 )
 
-            if (
+            elif (
                 arg.is_required is False
                 and arg.is_array is True
                 and arg.default is None
             ):
-                raise TODO(
-                    "arg",
-                    "is_required=False",
-                    "is_array=True",
-                    "default=None",
-                    *arg.__dict__.items(),
+                fargs.append(
+                    WrapperArgument(
+                        id=arg_id,
+                        type=list[str],
+                        default=[],
+                        cond=arg_id,
+                        argsappend="array_item",
+                        is_array=arg.is_array,
+                    )
                 )
 
-            if (
+            elif (
                 arg.is_required is False
                 and arg.is_array is False
                 and isinstance(arg.default, str)
             ):
                 fargs.append(
                     WrapperArgument(
-                        id=arg_name,
+                        id=arg_id,
                         type=str | None,
-                        default=repr(arg.default),
-                        cond=f"{arg_name} is not None and {arg_name} != {arg.default!r}",
-                        argsappend=arg_name,
+                        default=arg.default,
+                        cond=f"{arg_id} is not None and {arg_id} != {arg.default!r}",
+                        argsappend=arg_id,
                     )
                 )
 
-            if (
+            elif (
                 arg.is_required is False
                 and arg.is_array is False
                 and arg.default is None
             ):
-                raise TODO(
-                    "arg",
-                    "is_required=False",
-                    "is_array=False",
-                    "default=None",
+                fargs.append(
+                    WrapperArgument(
+                        id=arg_id,
+                        type=str | None,
+                        default=None,
+                        cond=f"{arg_id} is not None",
+                        argsappend=arg_id,
+                    )
+                )
+
+            elif (
+                arg.is_required is True
+                and arg.is_array is True
+                and arg.default is None
+                and True
+            ):
+                fargs.append(
+                    WrapperArgument(
+                        id=arg_id,
+                        type=list[str],
+                        default=inspect.Parameter.empty,
+                        cond=None,
+                        argsappend="array_item",
+                    )
+                )
+
+            else:
+                raise NotImplementedError(
+                    "unexpected argument combination",
+                    "-------------",
+                    *info.__dict__.items(),
+                    "-------------",
                     *arg.__dict__.items(),
                 )
 
-            if arg.is_required is True and arg.is_array is True and arg.default is None:
-                raise TODO(
-                    "arg",
-                    "is_required=True",
-                    "is_array=True",
-                    "default=None",
-                    *arg.__dict__.items(),
-                )
-
+        fopts = []
         for opt_name, opt in info.definition.options.items():
-            if opt.name in COMPOSER_IGNORE_OPTIONS:
+            if opt.name in _COMPOSER_IGNORE_OPTIONS:
                 continue
-            if opt.name in COMPOSER_GLOBAL_OPTIONS:
-                fargs.append(COMPOSER_GLOBAL_OPTIONS[opt.name])
+            if opt.name in _COMPOSER_GLOBAL_OPTIONS:
+                fopts.append(_COMPOSER_GLOBAL_OPTIONS[opt.name])
                 continue
 
-            opt_name = composer_help_id_to_python_id(opt_name)
+            opt_id = _composer_opt_name_to_python_id(opt.name)
+            opt_default_repr = repr(opt.default)
 
             if (
                 opt.accept_value is True
                 and opt.is_value_required is True
                 and opt.is_multiple is False
-                and opt.default is None
-                or isinstance(opt.default, str)
+                and (opt.default is None or isinstance(opt.default, str))
             ):
-                fargs.append(
+                fopts.append(
                     WrapperArgument(
-                        id=opt_name,
+                        id=opt_id,
                         type=str | None if opt.default is None else str,
-                        default=repr(opt.default),
-                        cond=f"{opt_name} is not None"
+                        default=opt.default,
+                        cond=f"{opt_id} is not None"
                         + (
                             ""
                             if opt.default is None
-                            else f" and {opt_name} != {opt.default!r}"
+                            else f" and {opt_id} != {opt_default_repr}"
                         ),
-                        argsappend=f"f'{opt.name}={{{opt_name}}}'",
+                        argsappend=f"f'{opt.name}={{{opt_id}}}'",
                     )
                 )
 
-            if (
+            elif (
                 opt.accept_value is True
                 and opt.is_value_required is True
                 and opt.is_multiple is True
                 and opt.default is None
             ):
-                raise TODO(
-                    "opt",
-                    "accept_value=True",
-                    "is_value_required=True",
-                    "is_multiple=True",
-                    "default=None",
-                    *opt.__dict__.items(),
+                fopts.append(
+                    WrapperArgument(
+                        id=opt_id,
+                        type=list[str],
+                        default=[],
+                        cond=f"{opt_id} is not None",
+                        argsappend=f"f'{opt.name}={{array_item}}'",
+                        is_array=opt.is_multiple,
+                    )
                 )
 
-            if (
+            elif (
                 opt.accept_value is True
                 and opt.is_value_required is False
                 and opt.is_multiple is False
                 and opt.default is False
             ):
-                raise TODO(
-                    "opt",
-                    "accept_value=True",
-                    "is_value_required=False",
-                    "is_multiple=False",
-                    "default=False",
-                    *opt.__dict__.items(),
+                fopts.append(
+                    WrapperArgument(
+                        id=opt_id,
+                        type=bool,
+                        default=opt.default,
+                        cond=opt_id,
+                        argsappend=f"f'{opt.name}={{{opt_id}}}' if {opt_id} else '{opt.name}'",
+                    )
                 )
 
-            if (
+            elif (
                 opt.accept_value is False
                 and opt.is_value_required is False
                 and opt.is_multiple is False
                 and (opt.default is None or isinstance(opt.default, bool))
             ):
-                fargs.append(
+                fopts.append(
                     WrapperArgument(
-                        id=opt_name,
+                        id=opt_id,
                         type=bool,
                         default=opt.default,
-                        cond=f"not {opt_name}" if opt.default else opt_name,
+                        cond=f"not {opt_id}" if opt.default else opt_id,
                         argsappend=f"'{opt.name}'",
                     )
+                )
+
+            else:
+                raise NotImplementedError(
+                    "unexpected option combination",
+                    "-------------",
+                    *info.__dict__.items(),
+                    "-------------",
+                    *opt.__dict__.items(),
                 )
 
         indent = " " * 4
         flines = []
         flines.append(f"def {fname}(")
-        for a in fargs:
-            flines.append(
-                indent
-                + a.id
-                + " : "
-                + (
-                    getattr(a.type, "__name__")
-                    if str(a.type).startswith("<")
-                    else str(a.type)
-                )
-                + " = "
-                + str(a.default)
-                + ","
-            )
+        for a in fargs + fopts:
+            flines.append(indent + a.get_signature() + ",")
         flines.append("):")
-        flines.append(indent + repr(info.description))
-        flines.append("")
+        fdocstr_lines = [info.description]
+        if info.usage:
+            fdocstr_lines.append("")
+            fdocstr_lines.append("Usage:")
+            fdocstr_lines.extend(info.usage)
+            fdocstr_lines.append("")
+        fdocstr = "\n".join([repr(line)[1:-1] for line in fdocstr_lines])
+        flines.append(indent + "'''" + fdocstr + "'''")
         flines.append(indent + "args = []")
 
-        for a in fargs:
-            if a.cond:
-                flines.append(indent + "if " + a.cond + ":")
-                if a.argsappend:
-                    flines.append(indent + indent + "args.append(" + a.argsappend + ")")
-                else:
-                    flines.append(indent + indent + "pass")
-            else:
-                flines.append(indent + f"# no cond for {a}")
+        statement_list = list(fopts)
+        if fargs:
+            statement_list.append(
+                WrapperArgument(
+                    id="",
+                    type=type(None),
+                    default=inspect.Parameter.empty,
+                    cond=None,
+                    argsappend="'--'",
+                )
+            )
+            statement_list.extend(fargs)
+        for a in statement_list:
+            ind = indent
+            if a.cond is not None:
+                flines.append(ind + "if " + a.cond + ":")
+                ind += indent
+                if a.is_array:
+                    flines.append(ind + f"for array_item in {a.id}:")
+                    ind += indent
+            flines.append(ind + f"args.append({a.argsappend})")
+
+        flines.append(indent + f"_composer_run('{info.name}', args)")
 
         fsrc = "\n".join(flines) + "\n"
         ftree = ast.parse(fsrc)
