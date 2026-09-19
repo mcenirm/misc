@@ -6,17 +6,45 @@ import unicodedata
 
 
 @functools.cache
-def str_to_identifier(s: str, lowercase=True) -> str:
-    if s is None:
-        return None
-    s = str(s)
-    if s == "":
-        return "_"
-    if lowercase:
-        s = s.lower()
-    s = s.replace(" ", "_")
-    s = s.replace("-", "_")
-    while keyword.iskeyword(s) or s in dir(builtins):
+def str_to_identifier(s: str) -> str:
+    r"""
+    >>> str_to_identifier(None) # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+        ...
+    TypeError: ...
+    >>> str_to_identifier(123) # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+        ...
+    TypeError: ...
+    >>> str_to_identifier("")
+    '__'
+    >>> str_to_identifier('!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~')
+    '________________________________'
+    >>> str_to_identifier("Hello, World!")
+    'Hello__World_'
+    >>> str_to_identifier("12.34")
+    '_12_34'
+    >>> str_to_identifier("for")
+    'for_'
+    >>> str_to_identifier("match")
+    'match_'
+    >>> str_to_identifier("int")
+    'int_'
+    """
+
+    if not isinstance(s, str):
+        raise TypeError(f"expected str, got {type(s).__name__}")
+
+    s = "".join([(ch if f"_{ch}".isidentifier() else "_") for ch in s])
+    if not s or not s[0].isidentifier():
+        s = "_" + s
+
+    tests = [
+        keyword.iskeyword,
+        keyword.issoftkeyword,
+        dir(builtins).__contains__,
+    ]
+    while any(t(s) for t in tests):
         s = s + "_"
     return s
 
