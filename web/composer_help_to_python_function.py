@@ -7,13 +7,24 @@ import json
 import pathlib
 import subprocess
 import sys
+import types
 import typing
 
 import black
 import dacite
+from frozendict import frozendict
+
 import frustra.cmds
 import frustra.strings
-from frozendict import frozendict
+
+
+@dataclasses.dataclass(frozen=True)
+class WrapperArgument:
+    id: str
+    type: type | types.UnionType
+    default: typing.Any
+    cond: str
+    argsappend: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -37,20 +48,49 @@ class ComposerCommandArgument:
     default: str | None
 
 
-COMPOSER_GLOBAL_OPTIONS = [
-    "--help",
-    "--quiet",
-    "--verbose",
-    "--version",
-    "--ansi",
-    "--no-ansi",
-    "--no-interaction",
-    "--profile",
-    "--no-plugins",
-    "--no-scripts",
-    "--working-dir",
-    "--no-cache",
-]
+def composer_help_id_to_python_id(id: str) -> str:
+    return frustra.strings.snake_case(id) or ""
+
+
+def wrapper_bool_false(composer_option_name: str) -> WrapperArgument:
+    python_id = composer_help_id_to_python_id(composer_option_name.removeprefix("--"))
+    return WrapperArgument(
+        id=python_id,
+        type=bool,
+        default=False,
+        cond=python_id,
+        argsappend=f"'{composer_option_name}'",
+    )
+
+
+def wrapper_bool_true(composer_option_name: str) -> WrapperArgument:
+    python_id = composer_help_id_to_python_id(
+        composer_option_name.removeprefix("--").removeprefix("no-")
+    )
+    return WrapperArgument(
+        id=python_id,
+        type=bool,
+        default=True,
+        cond=f"not {python_id}",
+        argsappend=f"'{composer_option_name}'",
+    )
+
+
+COMPOSER_GLOBAL_OPTIONS = {
+    "--quiet": wrapper_bool_false("--quiet"),
+    "--verbose": wrapper_bool_false("--verbose"),
+    "--no-plugins": wrapper_bool_true("--no-plugins"),
+    "--no-scripts": wrapper_bool_true("--no-scripts"),
+    "--working-dir": WrapperArgument(
+        id="working_dir",
+        type=str | pathlib.Path | None,
+        default=None,
+        cond="working_dir is not None",
+        argsappend="f'--working-dir={working_dir}'",
+    ),
+    "--no-cache": wrapper_bool_true("--no-cache"),
+}
+
 COMPOSER_IGNORE_OPTIONS = [
     "--help",
     "--version",
@@ -101,19 +141,6 @@ class ComposerListOutput:
     namespaces: tuple[ComposerNamespace, ...]
 
 
-@dataclasses.dataclass(frozen=True)
-class WrapperArgument:
-    id: str
-    type: type
-    default: str
-    cond: str
-    argsappend: str
-
-
-def composer_help_id_to_python_id(id: str) -> str:
-    return frustra.strings.snake_case(id)
-
-
 def _from_composer_json_output[T](
     args: list[str],
     data_class: type[T],
@@ -149,7 +176,7 @@ def _from_composer_json_output[T](
                 tuple[str, ...]: tuple,
                 tuple[ComposerCommand, ...]: tuple,
                 tuple[ComposerNamespace, ...]: tuple,
-            },
+            },  # type: ignore
             strict=True,
         ),
     )
@@ -172,22 +199,6 @@ def composer_help_to_python_function(
             ).commands
             if fnmatch.fnmatch(c.name, command_name)
         ]
-        arg_name_to_command_list = collections.defaultdict(list)
-        opt_name_to_command_list = collections.defaultdict(list)
-        for c in commands:
-            for n, a in c.definition.arguments.items():
-                arg_name_to_command_list[n].append(c.name)
-            for n, o in c.definition.options.items():
-                opt_name_to_command_list[n].append(c.name)
-        raise TODO(
-            *sorted((len(v), k) for k, v in arg_name_to_command_list.items()),
-            "-------------",
-            *sorted((len(v), k) for k, v in opt_name_to_command_list.items()),
-            "-------------",
-            *commands[0].definition.options["ansi"].__dict__.items(),
-            "-------------",
-            *commands[0].definition.options["no-ansi"].__dict__.items(),
-        )
     else:
         commands = [
             _from_composer_json_output(
@@ -212,14 +223,26 @@ def composer_help_to_python_function(
                 and arg.is_array is False
                 and arg.default is None
             ):
-                raise TODO("arg", "is_required=True", "is_array=False", "default=None")
+                raise TODO(
+                    "arg",
+                    "is_required=True",
+                    "is_array=False",
+                    "default=None",
+                    *arg.__dict__.items(),
+                )
 
             if (
                 arg.is_required is False
                 and arg.is_array is True
                 and arg.default is None
             ):
-                raise TODO("arg", "is_required=False", "is_array=True", "default=None")
+                raise TODO(
+                    "arg",
+                    "is_required=False",
+                    "is_array=True",
+                    "default=None",
+                    *arg.__dict__.items(),
+                )
 
             if (
                 arg.is_required is False
@@ -241,12 +264,30 @@ def composer_help_to_python_function(
                 and arg.is_array is False
                 and arg.default is None
             ):
-                raise TODO("arg", "is_required=False", "is_array=False", "default=None")
+                raise TODO(
+                    "arg",
+                    "is_required=False",
+                    "is_array=False",
+                    "default=None",
+                    *arg.__dict__.items(),
+                )
 
             if arg.is_required is True and arg.is_array is True and arg.default is None:
-                raise TODO("arg", "is_required=True", "is_array=True", "default=None")
+                raise TODO(
+                    "arg",
+                    "is_required=True",
+                    "is_array=True",
+                    "default=None",
+                    *arg.__dict__.items(),
+                )
 
         for opt_name, opt in info.definition.options.items():
+            if opt.name in COMPOSER_IGNORE_OPTIONS:
+                continue
+            if opt.name in COMPOSER_GLOBAL_OPTIONS:
+                fargs.append(COMPOSER_GLOBAL_OPTIONS[opt.name])
+                continue
+
             opt_name = composer_help_id_to_python_id(opt_name)
 
             if (
@@ -267,7 +308,7 @@ def composer_help_to_python_function(
                             if opt.default is None
                             else f" and {opt_name} != {opt.default!r}"
                         ),
-                        argsappend=f"{opt.name}={{{opt_name}}}",
+                        argsappend=f"f'{opt.name}={{{opt_name}}}'",
                     )
                 )
 
@@ -313,7 +354,7 @@ def composer_help_to_python_function(
                         type=bool,
                         default=opt.default,
                         cond=f"not {opt_name}" if opt.default else opt_name,
-                        argsappend=opt.name,
+                        argsappend=f"'{opt.name}'",
                     )
                 )
 
@@ -325,7 +366,11 @@ def composer_help_to_python_function(
                 indent
                 + a.id
                 + " : "
-                + getattr(a.type, "__name__", str(a.type))
+                + (
+                    getattr(a.type, "__name__")
+                    if str(a.type).startswith("<")
+                    else str(a.type)
+                )
                 + " = "
                 + str(a.default)
                 + ","
@@ -339,43 +384,18 @@ def composer_help_to_python_function(
             if a.cond:
                 flines.append(indent + "if " + a.cond + ":")
                 if a.argsappend:
-                    flines.append(
-                        indent + indent + "args.append(f'" + a.argsappend + "')"
-                    )
+                    flines.append(indent + indent + "args.append(" + a.argsappend + ")")
                 else:
                     flines.append(indent + indent + "pass")
             else:
                 flines.append(indent + f"# no cond for {a}")
 
-        raise TODO(*flines)
-
-        fdef = ast.FunctionDef(
-            name=fname,
-            args=ast.arguments(
-                posonlyargs=list_of_posonlyargs_from_definition,
-                args=list_of_args_from_definition,
-                kwonlyargs=list_of_kwonlyargs_from_definition,
-                vararg=single_arg_node_referring_to_splat_args,
-                kwarg=single_arg_node_referring_to_splat_splat_kwargs,
-                kw_defaults=list_of_default_values_for_keyword_only_arguments,
-                defaults=list_of_default_values_for_arguments_that_can_be_passed_positionally,
-            ),
-            body=fbody,
-            decorator_list=[],
-            returns=ast.Constant(value=None),
-            type_params=[],
-        )
-        m = ast.Module(
-            body=[fdef],
-            type_ignores=[],
-        )
-        ast.fix_missing_locations(m)
-        (scratch_dir / f"{info.name}.ast.txt").write_text(ast.dump(m, indent=4))
-        src = ast.unparse(m)
-        formatted_src = black.format_str(src, mode=black.Mode())
+        fsrc = "\n".join(flines) + "\n"
+        ftree = ast.parse(fsrc)
+        (scratch_dir / f"{info.name}.ast.txt").write_text(ast.dump(ftree, indent=4))
+        fsrc2 = ast.unparse(ftree)
+        formatted_src = black.format_str(fsrc2, mode=black.Mode())
         (scratch_dir / f"{fname}.py").write_text(formatted_src)
-
-        # print(formatted_src)
 
 
 class TODO(NotImplementedError): ...
