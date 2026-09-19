@@ -464,54 +464,72 @@ def _composer_run(
 
 def composer_create_project(
     package: str,
-    directory: pathlib.Path | None = None,
+    directory: str | pathlib.Path | None = None,
     version: str | None = None,
     *,
     stability: typing.Literal["dev", "alpha", "beta", "RC", "stable"] = "stable",
+    # prefer_source: bool = False,
+    # prefer_dist: bool = False,
     prefer_install: typing.Literal["dist", "source", "auto"] = "dist",
-    repository: list[str] | None = None,
+    repository: list[str] = [],
+    # repository_url: str | None = None,
     add_repository: bool = False,
-    require: list[str] | None = None,
+    require: list[str] = [],
     dev: bool = True,
+    # no_dev: bool = False,
+    # no_custom_installers: bool = False,
+    scripts: bool = True,
+    # no_progress: bool = False,
     secure_http: bool = True,
     keep_vcs: bool = False,
     remove_vcs: bool = False,
     install: bool = True,
     audit: bool = True,
     audit_format: typing.Literal["table", "plain", "json", "summary"] = "summary",
+    # no_security_blocking: bool = False,
     blocking: bool = True,
-    ignore_platform_req: bool | list[str] | None = None,
+    ignore_platform_req: list[str] = [],
+    ignore_platform_reqs: bool = False,
+    # ask: bool = False,
+    quiet: bool = False,
     verbose: typing.Literal[1, 2, 3] | None = None,
     plugins: bool = True,
-    scripts: bool = True,
+    working_dir: str | pathlib.Path | None = None,
     cache: bool = True,
-    working_dir: pathlib.Path | None = None,
-) -> ComposerProject:
-    """Creates new project from a package into given directory"""
+):
+    """Creates new project from a package into given directory
 
-    if not isinstance(package, str):
-        raise TypeError("package should be str", package)
+    Usage:
+    create-project [-s|--stability STABILITY] [--prefer-source] [--prefer-dist] [--prefer-install PREFER-INSTALL] [--repository REPOSITORY] [--repository-url REPOSITORY-URL] [--add-repository] [--require REQUIRE] [--dev] [--no-dev] [--no-custom-installers] [--no-scripts] [--no-progress] [--no-secure-http] [--keep-vcs] [--remove-vcs] [--no-install] [--no-audit] [--audit-format AUDIT-FORMAT] [--no-security-blocking] [--no-blocking] [--ignore-platform-req IGNORE-PLATFORM-REQ] [--ignore-platform-reqs] [--ask] [--] [<package> [<directory> [<version>]]]
+    """
 
     args = []
-    args.append(package)
-    if directory is not None:
-        directory = pathlib.Path(directory)
-        args.append(str(directory))
-    if version is not None:
-        args.append(str(version))
-
     if stability != "stable":
         args.append(f"--stability={stability}")
+    # if prefer_source:
+    #     args.append("--prefer-source")
+    # if prefer_dist:
+    #     args.append("--prefer-dist")
     if prefer_install != "dist":
         args.append(f"--prefer-install={prefer_install}")
-    for r in _listify(repository):
-        args.append(f"--repository={r}")
+    if repository is not None:
+        for r in repository:
+            args.append(f"--repository={r}")
+    # if repository_url is not None:
+    #     args.append(f"--repository-url={repository_url}")
     if add_repository:
         args.append("--add-repository")
-    for r in _listify(require):
-        args.append(f"--require={r}")
+    if require is not None:
+        for r in require:
+            args.append(f"--require={r}")
     if not dev:
         args.append("--no-dev")
+    # if no_custom_installers:
+    #     args.append("--no-custom-installers")
+    if not scripts:
+        args.append("--no-scripts")
+    # if no_progress:
+    #     args.append("--no-progress")
     if not secure_http:
         args.append("--no-secure-http")
     if keep_vcs:
@@ -524,18 +542,31 @@ def composer_create_project(
         args.append("--no-audit")
     if audit_format != "summary":
         args.append(f"--audit-format={audit_format}")
+    # if no_security_blocking:
+    #     args.append("--no-security-blocking")
     if not blocking:
         args.append("--no-blocking")
-    if isinstance(ignore_platform_req, bool):
-        if ignore_platform_req:
-            args.append("--ignore-platform-reqs")
-    else:
-        for r in _listify(ignore_platform_req):
+    if ignore_platform_req is not None:
+        for r in ignore_platform_req:
             args.append(f"--ignore-platform-req={r}")
+    if ignore_platform_reqs:
+        args.append("--ignore-platform-reqs")
+    # if ask:
+    #     args.append("--ask")
+    if quiet:
+        args.append("--quiet")
+
+    args.append("--")
+
+    args.append(package)
+    if directory is not None:
+        args.append(str(directory))
+    if version is not None:
+        args.append(version)
 
     # determine where the project will be created
     if directory:
-        resulting_dir = directory
+        resulting_dir = pathlib.Path(directory)
     else:
         if ":" in package:
             p, _, _ = package.partition(":")
@@ -561,16 +592,6 @@ def composer_create_project(
     )
 
     return ComposerProject(project_dir=resulting_dir)
-
-
-def _listify(obj: typing.Any) -> list:
-    if obj is None:
-        return []
-    if isinstance(obj, (str, bytes)):
-        return [obj]
-    if isinstance(obj, collections.abc.Sequence):
-        return list(obj)
-    return [obj]
 
 
 ############################################################
