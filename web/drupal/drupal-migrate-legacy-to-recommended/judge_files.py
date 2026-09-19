@@ -326,20 +326,10 @@ class ComposerProject:
         dest.mkdir()
         for f in [self.composer_json_file, self.composer_lock_file]:
             shutil.copyfile(f, dest / f.name)
-        raise TODO("now what???")
-        kw = {}
-
-        installed_self = self.get_installed_package_by_name(self.package.name)
-        if installed_self:
-            kw["version"] = installed_self.version
-
-        return composer_create_project(
-            self.package.name,
-            dest,
-            install=False,
-            ignore_platform_req=True,
-            blocking=False,
-            **kw,
+        return composer_install(
+            ignore_platform_reqs=True,
+            no_blocking=True,
+            working_dir=dest,
         )
 
 
@@ -418,10 +408,9 @@ def _composer_run(
     cache: bool = True,
     working_dir: pathlib.Path | None = None,
 ) -> int:
-    args = [
+    run_args = [
         "composer",
         str(command),
-        *(str(a) for a in args),
     ]
 
     if not verbose:
@@ -435,30 +424,32 @@ def _composer_run(
         elif verbose:
             v = "-v"
         if v:
-            args.append(v)
+            run_args.append(v)
     else:
-        args.append("--quiet")
+        run_args.append("--quiet")
     if not plugins:
-        args.append("--no-plugins")
+        run_args.append("--no-plugins")
     if not scripts:
-        args.append("--no-scripts")
+        run_args.append("--no-scripts")
     if not cache:
-        args.append("--no-cache")
+        run_args.append("--no-cache")
     if working_dir is not None:
         working_dir = pathlib.Path(working_dir)
-        args.append(f"--working-dir={working_dir}")
+        run_args.append(f"--working-dir={working_dir}")
 
-    args.append("--no-ansi")
-    args.append("--no-interaction")
-    args.append("--no-progress")
+    run_args.append("--no-ansi")
+    run_args.append("--no-interaction")
+    run_args.append("--no-progress")
 
-    print("#", shlex.quote(args[0]))
-    for a in args[1:]:
-        print("#    ", shlex.quote(a), "\\")
+    run_args.extend(args)
 
+    print("#", *map(shlex.quote, run_args[:2]), "   \\")
+    for a in run_args[2:]:
+        print("#    ", shlex.quote(a), "   \\")
+    print("#")
     return subprocess.check_call(
-        args,
-        universal_newlines=True,
+        run_args,
+        text=True,
     )
 
 
@@ -592,6 +583,112 @@ def composer_create_project(
     )
 
     return ComposerProject(project_dir=resulting_dir)
+
+
+def composer_install(
+    packages: list[str] = [],
+    prefer_source: bool = False,
+    prefer_dist: bool = False,
+    prefer_install: str | None = None,
+    dry_run: bool = False,
+    download_only: bool = False,
+    dev: bool = False,
+    no_suggest: bool = False,
+    no_dev: bool = False,
+    no_security_blocking: bool = False,
+    no_blocking: bool = False,
+    no_autoloader: bool = False,
+    no_progress: bool = False,
+    no_install: bool = False,
+    audit: bool = False,
+    audit_format: str = "summary",
+    verbose: typing.Literal[1, 2, 3] | None = None,
+    optimize_autoloader: bool = False,
+    classmap_authoritative: bool = False,
+    strict_psr_autoloader: bool = False,
+    apcu_autoloader: bool = False,
+    apcu_autoloader_prefix: str | None = None,
+    ignore_platform_req: list[str] = [],
+    ignore_platform_reqs: bool = False,
+    quiet: bool = False,
+    plugins: bool = True,
+    scripts: bool = True,
+    working_dir: str | pathlib.Path | None = None,
+    cache: bool = True,
+):
+    """Installs the project dependencies from the composer.lock file if present, or falls back on the composer.json
+
+    Usage:
+    install [--prefer-source] [--prefer-dist] [--prefer-install PREFER-INSTALL] [--dry-run] [--download-only] [--dev] [--no-suggest] [--no-dev] [--no-security-blocking] [--no-blocking] [--no-autoloader] [--no-progress] [--no-install] [--audit] [--audit-format AUDIT-FORMAT] [-v|vv|vvv|--verbose] [-o|--optimize-autoloader] [-a|--classmap-authoritative] [--strict-psr-autoloader] [--apcu-autoloader] [--apcu-autoloader-prefix APCU-AUTOLOADER-PREFIX] [--ignore-platform-req IGNORE-PLATFORM-REQ] [--ignore-platform-reqs] [--] [<packages>...]
+    i
+    """
+
+    args = []
+    if prefer_source:
+        args.append("--prefer-source")
+    if prefer_dist:
+        args.append("--prefer-dist")
+    if prefer_install is not None:
+        args.append(f"--prefer-install={prefer_install}")
+    if dry_run:
+        args.append("--dry-run")
+    if download_only:
+        args.append("--download-only")
+    if dev:
+        args.append("--dev")
+    if no_suggest:
+        args.append("--no-suggest")
+    if no_dev:
+        args.append("--no-dev")
+    if no_security_blocking:
+        args.append("--no-security-blocking")
+    if no_blocking:
+        args.append("--no-blocking")
+    if no_autoloader:
+        args.append("--no-autoloader")
+    if no_progress:
+        args.append("--no-progress")
+    if no_install:
+        args.append("--no-install")
+    if audit:
+        args.append("--audit")
+    if audit_format is not None and audit_format != "summary":
+        args.append(f"--audit-format={audit_format}")
+    if optimize_autoloader:
+        args.append("--optimize-autoloader")
+    if classmap_authoritative:
+        args.append("--classmap-authoritative")
+    if strict_psr_autoloader:
+        args.append("--strict-psr-autoloader")
+    if apcu_autoloader:
+        args.append("--apcu-autoloader")
+    if apcu_autoloader_prefix is not None:
+        args.append(f"--apcu-autoloader-prefix={apcu_autoloader_prefix}")
+    if ignore_platform_req is not None:
+        for array_item in ignore_platform_req:
+            args.append(f"--ignore-platform-req={array_item}")
+    if ignore_platform_reqs:
+        args.append("--ignore-platform-reqs")
+    if quiet:
+        args.append("--quiet")
+    args.append("--")
+    if packages:
+        for array_item in packages:
+            args.append(array_item)
+
+    working_dir = pathlib.Path(working_dir or "")
+
+    _composer_run(
+        "install",
+        args,
+        verbose=verbose,
+        plugins=plugins,
+        scripts=scripts,
+        cache=cache,
+        working_dir=working_dir,
+    )
+
+    return ComposerProject(project_dir=working_dir)
 
 
 ############################################################
@@ -823,7 +920,8 @@ def judge_files(
             legacy.composer_json_file,
         )
 
-    cloned = legacy.clone_to(scratch_dir / "cloned")
+    cloned_dir = scratch_dir / "cloned"
+    cloned = legacy.clone_to(cloned_dir)
 
     recommended = ComposerProject(recommended_dir)
     if recommended.package.name is None:
@@ -846,12 +944,12 @@ def judge_files(
             directory=recommended_dir,
             version=legacy_locked_version,
             ignore_platform_reqs=True,
-            ansi=False,
-            interaction=False,
         )
 
     leg_cfier = LegacyClassifier()
     leg_cfications = {rp: leg_cfier.classify(rp) for rp in relative_walk(legacy_dir)}
+    clo_cfications = {rp: leg_cfier.classify(rp) for rp in relative_walk(cloned_dir)}
+
     rec_cfier = RecommendedClassifier(web_relative=recommended_web_relative)
     rec_cfications = {
         rp: rec_cfier.classify(rp) for rp in relative_walk(recommended_dir)
@@ -864,30 +962,40 @@ def judge_files(
     for leg_relpath, leg_quals in leg_cfications.items():
         leg_file = legacy_dir / leg_relpath
 
+        other_relpath = None
+        other_quals = None
+        other_file = None
         for rec_prefix in ["", recommended_web_relative]:
-            rec_relpath = rec_prefix + leg_relpath
-            if rec_relpath in rec_cfications:
-                rec_quals = rec_cfications.pop(rec_relpath)
-                rec_file = recommended_dir / rec_relpath  # type: ignore
-                judgments.compare(leg_relpath, leg_file, rec_file)
+            other_relpath = rec_prefix + leg_relpath
+            if other_relpath in rec_cfications:
+                other_quals = rec_cfications.pop(other_relpath)
+                other_file = recommended_dir / other_relpath
+                judgments.compare(leg_relpath, leg_file, other_file)
                 break
-        else:
-            rec_quals = Qualities()
+        if leg_relpath in clo_cfications:
+            other_quals = clo_cfications.pop(leg_relpath)
+            other_file = cloned_dir / leg_relpath
+            judgments.compare(leg_relpath, leg_file, other_file)
+        if other_quals is None:
+            other_relpath = None
+            other_quals = Qualities()
             judgments.added(leg_relpath, leg_file)
-            rec_relpath = None
 
         judgments.qualities(
             leg_relpath,
             dataclasses.replace(
                 leg_quals,
-                **{k: v for k, v in rec_quals.__dict__.items() if v is not None},
+                **{k: v for k, v in other_quals.__dict__.items() if v is not None},
             ),
         )
         vj = judgments[leg_relpath]
 
         leg_guessed_name = legacy.guess_package(leg_relpath)
-        rec_guessed_name = recommended.guess_package(rec_relpath)
-        vj.package_guess = leg_guessed_name or rec_guessed_name or None
+        clo_guessed_name = cloned.guess_package(leg_relpath)
+        rec_guessed_name = recommended.guess_package(other_relpath)
+        vj.package_guess = (
+            leg_guessed_name or clo_guessed_name or rec_guessed_name or None
+        )
 
         if leg_guessed_name:
             if vj.libraries:
@@ -907,10 +1015,12 @@ def judge_files(
         if rec_guess:
             vj.recommended_version = rec_guess.version
 
-    for rec_relpath, rec_quals in rec_cfications.items():
-        rec_file = recommended_dir / rec_relpath
-        judgments.missing(rec_relpath, rec_file)
-        judgments.qualities(rec_relpath, rec_quals)
+    other_cfications = clo_cfications
+    other_dir = cloned_dir
+    for other_relpath, other_quals in other_cfications.items():
+        other_file = other_dir / other_relpath
+        judgments.missing(other_relpath, other_file)
+        judgments.qualities(other_relpath, other_quals)
 
     if judgments_csv.exists():
         judgments_csv.rename(judgments_csv.with_suffix(".bak"))
