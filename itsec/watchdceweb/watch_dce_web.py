@@ -1,4 +1,4 @@
-# TODO (mabye)
+# TODO (maybe)
 # * do not keep old revisions of artifacts
 # * extract important details from artifacts and store in a history
 # * generate report showing changes of important details
@@ -6,14 +6,22 @@
 
 from __future__ import annotations
 
-import dataclasses as _dataclasses
-import datetime as _datetime
-import pathlib as _pathlib
+import configparser
+import dataclasses
+import datetime
+import json
+import pathlib
+import re
+import shutil
+import time
+import urllib.parse
+import urllib.request
 
+import bs4
 from icecream import ic
 from rich import inspect as ri
 
-DEFAULT_LOCAL_SETTINGS_PATH = _pathlib.Path("local-settings.ini")
+DEFAULT_LOCAL_SETTINGS_PATH = pathlib.Path("local-settings.ini")
 
 
 DEFAULT_LOCAL_SETTINGS_TEMPLATE = """
@@ -23,20 +31,21 @@ downloads = <path to downloads folder>
 """
 
 
-@_dataclasses.dataclass(kw_only=True, frozen=True)
+@dataclasses.dataclass(kw_only=True, frozen=True)
 class Artifact:
     url: str
     download_name: str = ""
+    ext: str = ".html"
 
     def __post_init__(self):
         if self.download_name == "":
-            guess = guess_download_name_from_url2(url=self.url)
+            guess = guess_download_name_from_url2(url=self.url, ext=self.ext)
             if guess is None:
                 raise ValueError("unable to guess download name for url", self.url)
             object.__setattr__(self, "download_name", guess)
 
 
-def guess_download_name_from_url(*, url: str) -> str | None:
+def guess_download_name_from_url(*, url: str, ext=".html") -> str | None:
     """
 
     >>> guess_download_name_from_url(url=None)
@@ -58,18 +67,15 @@ def guess_download_name_from_url(*, url: str) -> str | None:
 
     """
 
-    from pathlib import PurePosixPath
-    from urllib.parse import urlparse
-
-    parsed = urlparse(url=url, allow_fragments=True)
+    parsed = urllib.parse.urlparse(url=url, allow_fragments=True)
     if url is None or parsed.scheme == "data":
         return None
     if parsed.hostname and (parsed.path or "/") == "/" and not parsed.query:
-        return parsed.hostname + ".html"
-    guess = PurePosixPath(parsed.path)
+        return parsed.hostname + ext
+    guess = pathlib.PurePosixPath(parsed.path)
     if guess.suffix and not parsed.query:
         return guess.name
-    suffix, guess = (guess.suffix or ".html"), guess.with_suffix("")
+    suffix, guess = (guess.suffix or ext), guess.with_suffix("")
     guess = parsed.hostname + str(guess).replace("/", "--")
     if parsed.query:
         guess += "--" + parsed.query
@@ -77,7 +83,7 @@ def guess_download_name_from_url(*, url: str) -> str | None:
     return guess
 
 
-def guess_download_name_from_url2(*, url: str) -> str | None:
+def guess_download_name_from_url2(*, url: str, ext: str | None = None) -> str | None:
     """
 
     >>> guess_download_name_from_url2(url=None)
@@ -101,27 +107,29 @@ def guess_download_name_from_url2(*, url: str) -> str | None:
 
     """
 
-    from pathlib import PurePosixPath
-    from urllib.parse import urlparse
-
-    parsed = urlparse(url=url, allow_fragments=True)
+    parsed = urllib.parse.urlparse(url=url, allow_fragments=True)
     if url is None or parsed.scheme == "data":
         return None
-    path = PurePosixPath(parsed.path.removeprefix("/"))
+    path = pathlib.PurePosixPath(parsed.path.removeprefix("/"))
     suffix = path.suffix
     if suffix:
         path = path.with_suffix("")
-    path = PurePosixPath(parsed.hostname) / path
+    path = pathlib.PurePosixPath(parsed.hostname) / path
     guess = str(path)
     if parsed.query:
         guess += "--" + parsed.query
-    guess += suffix or ".html"
+    if suffix and ext is None:
+        guess += suffix
+    elif ext is None:
+        guess += ".html"
+    elif ext and ext != suffix:
+        guess += ext
     return guess
 
 
 def refresh_local_settings(
     *,
-    configfile: _pathlib.Path = DEFAULT_LOCAL_SETTINGS_PATH,
+    configfile: pathlib.Path = DEFAULT_LOCAL_SETTINGS_PATH,
     template: str = DEFAULT_LOCAL_SETTINGS_TEMPLATE,
 ):
     r"""
@@ -158,16 +166,19 @@ def refresh_local_settings(
             f.write(template)
         return
 
-    from configparser import ConfigParser
-
-    cp = ConfigParser()
+    cp = configparser.ConfigParser()
     cp.read_string(template, source="<template>")
     cp.read(configfile)
     with configfile.open("w") as f:
         cp.write(f)
 
 
-def retrieve(*, url: str, download_to: _pathlib.Path) -> _pathlib.Path:
+def retrieve(
+    *,
+    url: str,
+    download_to: pathlib.Path,
+    unless_too_recent=datetime.timedelta(minutes=60),
+) -> pathlib.Path:
     r"""
 
     >>> from pathlib import Path
@@ -188,44 +199,197 @@ def retrieve(*, url: str, download_to: _pathlib.Path) -> _pathlib.Path:
 
     """
 
-    from pathlib import Path
-    from shutil import copy2
-    from urllib.request import urlcleanup, urlretrieve
+    if unless_too_recent:
+        if download_to.is_file() and file_age(download_to) < unless_too_recent:
+            return download_to
+
+    download_to.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        tmp, msg = urlretrieve(url=url)
-        real_downloaded_to = Path(copy2(tmp, download_to))
+        tmp, msg = urllib.request.urlretrieve(url=url)
+        ic(msg.items())
+        real_downloaded_to = pathlib.Path(shutil.copy2(tmp, download_to))
     finally:
-        urlcleanup()
+        urllib.request.urlcleanup()
     return real_downloaded_to
 
 
-def file_age(path: _pathlib.Path) -> _datetime.timedelta:
-    from datetime import timedelta
-    from time import time
+def file_age(path: pathlib.Path) -> datetime.timedelta:
+    return datetime.timedelta(seconds=time.time() - path.stat().st_mtime)
 
-    return timedelta(seconds=time() - path.stat().st_mtime)
+
+class LWR:
+    def __init__(self, soup: bs4.BeautifulSoup):
+        self.soup = soup
+        self.base_path = self.extract_lwr_base_path()
+        self.routes = self.extract_routes()
+        self.views = self.extract_views_mapping()
+
+    def is_lwr_app(self) -> bool:
+        # 1. Check for the LWR custom root DOM element
+        if self.soup.find("webruntime-app"):
+            return True
+
+        # 2. Check <script> tags for LWR runtime module imports or endpoints
+        script_src_pattern = re.compile(
+            r"(/lwr/|/webruntime/|@app/|@salesforce/)", re.IGNORECASE
+        )
+        for script in self.soup.find_all("script", src=True):
+            if script_src_pattern.search(script["src"]):
+                return True
+
+        # 3. Check inline <script> tags for LWR module initializations
+        # Matches LWR.define, window.LWR, window.LWR_LOADER, or LWR.provide
+        inline_pattern = re.compile(
+            r"(?:window\s*\.\s*LWR(?:_LOADER)?|LWR\s*\.\s*(?:define|provide|config))\s*\(",
+            re.IGNORECASE,
+        )
+        for script in self.soup.find_all("script", src=False):
+            if script.string and inline_pattern.search(script.string):
+                return True
+
+        return False
+
+    def extract_lwr_base_path(self) -> str | None:
+        # 1. Matches LWR.define('@app/basePath', [], function() { return '/site/s'; })
+        # Accepts string primitives or object returns containing basePath
+        base_path_pattern = re.compile(
+            r"\bLWR\.define\s*\(\s*['\"]@app/basePath['\"]\s*,\s*\[\]\s*,\s*function\s*\(\)\s*\{\s*return\s*['\"](|/[^'\"]+)['\"]\s*;\s*\}\s*\)",
+            re.IGNORECASE,
+        )
+
+        # 2. Matches LWR.define('@app/context', ...) or window.LWR object structure
+        context_pattern = re.compile(
+            r"LWR\.define\s*\(\s*['\"]@app/context['\"]\s*,\s*\[\]\s*,\s*function\s*\(\)\s*\{\s*return\s*(\{.*?\}|\{.*\})\s*;\s*\}\s*\)",
+            re.DOTALL,
+        )
+        lwr_obj_pattern = re.compile(
+            r"window\.LWR\s*=\s*window\.LWR\s*\|\|\s*(\{.*?\});", re.DOTALL
+        )
+
+        for script in self.soup.find_all("script", src=False):
+            if not script.string:
+                continue
+
+            # Check @app/basePath module
+            base_match = base_path_pattern.search(script.string)
+            if base_match:
+                return base_match.group(1)
+
+            # Check @app/context module
+            ctx_match = context_pattern.search(script.string)
+            if ctx_match:
+                try:
+                    data = json.loads(ctx_match.group(1))
+                    if "basePath" in data:
+                        return data["basePath"]
+                except json.JSONDecodeError:
+                    pass
+
+            # Check window.LWR script object
+            lwr_match = lwr_obj_pattern.search(script.string)
+            if lwr_match:
+                try:
+                    data = json.loads(lwr_match.group(1))
+                    if "basePath" in data:
+                        return data["basePath"]
+                except json.JSONDecodeError:
+                    pass
+
+        # 3. Fallback: Parse root element attributes
+        app_element = self.soup.find("webruntime-app")
+        if app_element and app_element.has_attr("data-base-path"):
+            return app_element["data-base-path"]
+
+        return None
+
+    def extract_routes(self) -> list[dict] | None:
+        # Pattern matching LWR.define('@app/routes', ...) structure
+        pattern = re.compile(
+            r"LWR\.define\s*\(\s*['\"]@app/routes['\"]\s*,\s*\[\]\s*,\s*function\s*\(\)\s*\{\s*return\s*(\[.*?\])\s*;\s*\}\s*\)",
+            re.DOTALL,
+        )
+
+        # Inspect all inline script tags
+        for script in self.soup.find_all("script", src=False):
+            if not script.string:
+                continue
+
+            match = pattern.search(script.string)
+            if match:
+                raw_json_array = match.group(1)
+                try:
+                    # Parse the extracted JSON route array
+                    return json.loads(raw_json_array)
+                except json.JSONDecodeError:
+                    # Handle cases where keys/strings use single quotes or unquoted keys
+                    cleaned_json = re.sub(r"'", '"', raw_json_array)
+                    return json.loads(cleaned_json)
+
+        return None
+
+    def extract_views_mapping(self) -> dict[str, str] | None:
+        pattern = re.compile(r"['\"]@view/(\w+)['\"]\s*:\s*['\"]([^'\"]+)['\"]\s*[,}]")
+
+        for script in self.soup.find_all("script", src=False):
+            if not script.string:
+                continue
+
+            views = {m.group(1): m.group(2) for m in pattern.finditer(script.string)}
+            if views:
+                return views
+
+        return None
+
+    def get_app_relative_path(self, url_or_path: str) -> str:
+        parts = urllib.parse.urlsplit(url_or_path)
+        return parts.path.removeprefix(self.base_path)
+
+    def match_route(self, url_path: str) -> dict | None:
+        url_path = self.get_app_relative_path(url_path)
+        for route in self.routes:
+            route_pattern = route.get("path")
+            if not route_pattern:
+                continue
+
+            # Convert Express-style params (:id -> named group, * -> wildcard)
+            regex_pattern = re.sub(r":(\w+)", r"(?P<\1>[^/]+)", route_pattern)
+            regex_pattern = re.sub(r"\*", r".*", regex_pattern)
+            regex = f"^{regex_pattern}$"
+
+            if re.match(regex, url_path):
+                return route
+
+        return None
 
 
 def main() -> None:
-    from configparser import ConfigParser
-    from datetime import timedelta
-    from pathlib import Path
-
     refresh_local_settings()
-    cp = ConfigParser()
+    cp = configparser.ConfigParser()
     cp.read(DEFAULT_LOCAL_SETTINGS_PATH)
     settings = dict(cp["settings"])
     ic(settings)
     web = settings["web"]
-    downloads = Path(settings["downloads"])
+    downloads = pathlib.Path(settings["downloads"])
     downloads.mkdir(exist_ok=True, parents=True)
     web_artifact = Artifact(url=web)
-    web_copy = downloads / web_artifact.download_name
-    too_recent = web_copy.is_file() and file_age(web_copy) < timedelta(minutes=30)
-    if not too_recent:
-        web_copy = retrieve(url=web, download_to=web_copy)
+    ic(web_artifact)
+    web_copy = retrieve(url=web, download_to=downloads / web_artifact.download_name)
     ic(web_copy, web_copy.stat())
+    soup = bs4.BeautifulSoup(web_copy.read_bytes(), "html5lib")
+    ic(repr(str(soup.html.body))[:80])
+    lwr = LWR(soup)
+    current_route = lwr.match_route(web_artifact.url)
+    current_view = lwr.views[current_route["view"]]
+    ic(current_route)
+    ic(current_view)
+    view = Artifact(
+        url=urllib.parse.urljoin(web_artifact.url, lwr.base_path + current_view),
+        ext=".json",
+    )
+    ic(view)
+    view_copy = retrieve(url=view.url, download_to=downloads / view.download_name)
+    ic(view_copy, view_copy.stat())
 
 
 if __name__ == "__main__":
