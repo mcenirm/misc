@@ -1,5 +1,18 @@
-function dl { & curl.exe -LROJ @args }
-function dlo { & curl.exe -LR -o @args }
+function dl_ {
+    & curl.exe --write-out (
+        @(
+            ''
+            'location:  %header{location:all:\n        :  }'
+            ''
+            'status:    %{response_code}'
+            'size:      %{size_download}'
+            'type:      %{content_type}'
+            'filename:  %{filename_effective}'
+        ) -join '\n'
+    ) --globoff --location --remote-time @args
+}
+function dl { & dl_ --remote-name --remote-header-name @args }
+function dlo { & dl_ --output @args }
 function delldl { & dl --header 'user-agent: Chrome/1337' @args }
 function 7z { & "$env:ProgramFiles\7-Zip\7z.exe" @args }
 function wgup { & winget upgrade @args }
