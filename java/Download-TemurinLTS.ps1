@@ -5,20 +5,17 @@ param (
     [Parameter(Position = 0)]
     [Alias('Version', 'MajorVersion', 'Release')]
     [ValidateSet('8', '11', '17', '21', '25', '29')]
-    [string]
-    $FeatureRelease = '25',
+    [string]$FeatureRelease = '25',
 
     [Parameter(Position = 1)]
     [Alias('Type')]
     [ValidateSet('JDK', 'JRE')]
-    [string]
-    $ImageType = 'JDK',
+    [string]$ImageType = 'JDK',
 
     [Parameter()]
     [Alias('OS')]
     [ValidateSet('windows', 'mac', 'linux', 'aix', 'alpine-linux', 'solaris')]
-    [string]
-    $OperatingSystem = $(
+    [string]$OperatingSystem = $(
         if ($IsWindows) { 'windows' }
         elseif ($IsMacOS) { 'mac' }
         elseif ($IsLinux) { 'linux' }
@@ -42,6 +39,10 @@ param (
     ),
 
     [Parameter()]
+    [ValidateSet('installer', 'package')]
+    [string]$BinaryType = 'package',
+
+    [Parameter()]
     [ValidateSet('hotspot')]
     [string]$JvmImpl = 'hotspot',
 
@@ -50,8 +51,7 @@ param (
         { Test-Path $_ -PathType Container },
         ErrorMessage = "Destination directory '{0}' was not found.")
     ]
-    [string]
-    $DestinationPath = $PWD.Path
+    [string]$DestinationPath = $PWD.Path
 )
 
 $relSlug = $FeatureRelease.ToLowerInvariant()
@@ -75,9 +75,9 @@ $apiUrl = 'https://api.adoptium.net/v3/assets/latest/{0}/{1}?{2}' -f @(
 )
 
 $latest = (Invoke-RestMethod -Uri $apiUrl)[0]
-$pkg = $latest.binary.package
-$link = $pkg.link
-$path = [System.Uri]::EscapeDataString($pkg.name)
+$bin = $latest.binary.$BinaryType
+$link = $bin.link
+$path = [System.Uri]::EscapeDataString($bin.name)
 
 $dest = Resolve-Path -Path $DestinationPath
 if ($dest.Path -ne $PWD.Path) {
@@ -91,7 +91,7 @@ if (
         (
             (Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant()
         ) -eq (
-            $pkg.checksum
+            $bin.checksum
         )
     )
 ) {
@@ -102,7 +102,17 @@ else {
     Write-Host ".......from $link"
     $curlExe = (Get-Command curl -CommandType Application -ErrorAction Stop).Source
     $curlOpts = @(
-        '--write-out=%header{location:all:\n}\n'
+        '--write-out', (
+            @(
+                ''
+                'location:  %header{location:all:\n        :  }'
+                ''
+                'status:    %{response_code}'
+                'size:      %{size_download}'
+                'type:      %{content_type}'
+                'filename:  %{filename_effective}'
+            ) -join '\n'
+        )
         '--clobber'
         '--globoff'
         '--location'
