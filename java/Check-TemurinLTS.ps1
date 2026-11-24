@@ -34,5 +34,6 @@ foreach ($v in $ltsVersions) {
         LTS          = $v
         ReleaseName  = $release[0].release_name
         BuildVersion = $release[0].version_data.semver
+        Timestamp    = $release[0].timestamp
     }
 }
